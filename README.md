@@ -6,7 +6,7 @@ description: "Satellite for the Momiji TLU using a Python-based control software
 category: "Readout systems"
 language: "Python"
 parent_class: "Satellite"
-version:v1.0.0
+version: v1.0.0
 ---
 
 ## First Steps
