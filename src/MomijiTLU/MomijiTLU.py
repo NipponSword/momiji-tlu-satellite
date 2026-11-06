@@ -8,5 +8,5 @@ from constellation.core.satellite import Satellite
 from . import __version__
 
 
-class Template(Satellite, version=__version__):
+class MomijiTLU(Satellite, version=__version__):
     pass

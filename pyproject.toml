@@ -6,10 +6,10 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "TemplateSatellite"
+name = "MomijiTLUSatellite"
 dynamic = ["version"]
 authors = [{name = "Constellation Authors"}]
-description = "Template Satellite for Constellation"
+description = "MomijiTLU Satellite for Constellation"
 readme = "README.md"
 license = {text = "EUPL-1.2"}
 classifiers = [
@@ -31,14 +31,14 @@ dependencies = [
 ]
 
 [project.scripts]
-SatelliteTemplate = "Template.__main__:main"
+SatelliteMomijiTLU = "MomijiTLU.__main__:main"
 
 [project.entry-points."constellation.satellites"]
-Template = "Template"
+MomijiTLU = "MomijiTLU"
 
 [project.urls]
-Homepage = "https://constellation.pages.desy.de/"
-Repository = "https://gitlab.desy.de/constellation/templates/satellite-py"
+Homepage = "TODO"
+Repository = "TODO"
 
 [project.optional-dependencies]
 dev = [
