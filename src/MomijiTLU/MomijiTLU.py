@@ -4,7 +4,7 @@ SPDX-License-Identifier: EUPL-1.2
 """
 
 from collections import deque
-from enum import IntEnum, StrEnum
+from enum import StrEnum
 import os
 import threading
 import time
@@ -21,16 +21,11 @@ from constellation.core.commandmanager import cscp_requestable
 
 from . import __version__
 from . import rbcp
+from .registers import Addr, Ctrl, Stat
 
 class Polarity(StrEnum):
     RISING = "rising"
     FALLING = "falling"
-
-class Addr(IntEnum):
-    FW_VERSION  = 0x00
-    N_IN        = 0x04
-    N_BUSY      = 0x05
-    LUT         = 0x30
 
 class MomijiTLU(TransmitterSatellite, version=__version__):
     def __init__(self, *args, **kwargs):
@@ -47,18 +42,21 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             3. apply
         """
 
-        configuration = self._read_config(config)
+        cfg = self._read_config(config)
 
         if self.rbcp:
             self.rbcp.close()
 
         self.rbcp = rbcp.Rbcp(
-            ip=configuration["ip_hws"],
-            port=configuration["port_hws"],
+            ip=cfg["ip_hws"],
+            port=cfg["port_hws"],
         )
 
         self.fw_version = self.rbcp.read32(Addr.FW_VERSION)
         self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
+
+        # --- write configuration to RBCP regs
+        self._write_reg_and_check(Addr.DUT_MASK, cfg['dut_mask'])
 
         return "Do initializing complete"
 
@@ -147,3 +145,29 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # self.log.debug("Calculating status every %.3f s" % self.status_interval)
 
         return configuration
+
+    def _write_reg_and_check(self, address: Addr, value: int, bit: int = 8) -> bool:
+        
+        check = False
+
+        match bit:
+            case 8:
+                self.rbcp.write8(address, value)
+                response = self.rbcp.read8(address)
+            case 16:
+                self.rbcp.write16(address, value)
+                response = self.rbcp.read16(address)
+            case 64:
+                self.rbcp.write(address, value.to_bytes(8, "big"))
+                response = self.rbcp.read64(address)
+            case _:
+                raise ValueError("Incorrect bit width")
+        
+        check = (value == response)
+
+        if check:
+            self.log.info(f"Write {value} to {address.name}")
+        else:
+            raise RuntimeError(f"{address.name}: wrote 0x{value:02x}, read 0x{response:02x}")
+
+        return check

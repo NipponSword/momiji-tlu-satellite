@@ -109,6 +109,7 @@ class Rbcp:
     def read16(self, addr):  return self.read_uint(addr, 2)
     def read32(self, addr):  return self.read_uint(addr, 4)
     def read48(self, addr):  return self.read_uint(addr, 6)
+    def read64(self, addr):  return self.read_uint(addr, 8)
     def write8(self, addr, v):  self.write_uint(addr, v, 1)
     def write16(self, addr, v): self.write_uint(addr, v, 2)
 
