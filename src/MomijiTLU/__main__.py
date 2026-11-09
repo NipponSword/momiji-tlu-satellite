@@ -4,7 +4,7 @@ SPDX-License-Identifier: EUPL-1.2
 """
 
 from constellation.core.logging import setup_cli_logging
-from constellation.core.satellite import SatelliteArgumentParser
+from constellation.core.transmitter_satellite import TransmitterSatelliteArgumentParser
 
 from .MomijiTLU import MomijiTLU
 
@@ -13,7 +13,9 @@ def main(args=None):
     """MomijiTLU satellite"""
 
     # Get a dict of the parsed arguments
-    parser = SatelliteArgumentParser(description=main.__doc__, version=MomijiTLU._satellite_version)
+    parser = TransmitterSatelliteArgumentParser(
+        description=main.__doc__,
+        version=MomijiTLU._satellite_version)
     args = vars(parser.parse_args(args))
 
     # Set up logging

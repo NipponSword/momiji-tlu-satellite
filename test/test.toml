@@ -1,0 +1,3 @@
+[MomijiTLU.tlu]
+ip_hws = "192.168.10.16"
+trigger_input_logic = 0xAAAA
