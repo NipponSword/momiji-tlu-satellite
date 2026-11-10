@@ -33,6 +33,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.file_path = Path(__file__).parent
         self.rbcp = None
         self.fw_version = None
+        self.n_in   = 4
+        self.n_busy = 5
 
     def do_initializing(self, config: Configuration) -> str:
         """
@@ -42,22 +44,43 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             3. apply
         """
 
+        # --- check firmware settings
+        self.fw_version = self.rbcp.read32(Addr.FW_VERSION)
+        self.n_in       = self.rbcp.read8(Addr.N_IN)
+        self.n_busy     = self.rbcp.read8(Addr.N_BUSY)
+
+        self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
+        self.log.info(f"N_IN       0x{self.n_in}")
+        self.log.info(f"N_BUSY     0x{self.n_busy}")
+
+        # --- get configuration
         cfg = self._read_config(config)
 
+        # --- write configuration to RBCP regs
         if self.rbcp:
             self.rbcp.close()
 
         self.rbcp = rbcp.Rbcp(
-            ip=cfg["ip_hws"],
-            port=cfg["port_hws"],
+            ip=cfg['ip_hws'],
+            port=cfg['port_hws'],
         )
+        self._write_reg_and_check(Addr.DUT_MASK, cfg['dut_mask'], 8)
+        self._write_reg_and_check(Addr.BLOCK_MASK, cfg['block_mask'], 8)
+        self._write_reg_and_check(Addr.LUT, cfg['trigger_input_logic'], 64)
+        self._write_reg_and_check(Addr.TRG_O_WIDTH, cfg['trigger_output_width'], 8)
+        self._write_reg_and_check(Addr.TRG_INVERT, cfg['trigger_polarity'], 8)
+        self._write_reg_and_check(Addr.BUSY_INVERT, cfg['busy_polarity'], 8)
+        self._write_reg_and_check(Addr.BUSY_TIMEOUT, cfg['busy_timeout'], 16)
+        self._write_reg_and_check(Addr.T0_WIDTH, cfg['t0_width'], 8)
+        for i in range(self.n_in):
+            self._write_reg_and_check(Addr.TRG_I_WIDTH + i, cfg['trigger_input_width'], 8)
+        for i in range(self.n_busy):
+            self._write_reg_and_check(Addr.BUSY_WIDTH + i, cfg['busy_input_width'], 8)
 
-        self.fw_version = self.rbcp.read32(Addr.FW_VERSION)
-        self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
+        # --- apply 
+        self.rbcp.write(Addr.CTRL, Ctrl.APPLY) #TODO: how to check applied?
 
-        # --- write configuration to RBCP regs
-        self._write_reg_and_check(Addr.DUT_MASK, cfg['dut_mask'])
-
+        # --- complete initializing
         return "Do initializing complete"
 
     def do_launching(self) -> str:
@@ -88,6 +111,14 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         """
         Reads and checks Constellation configuration
         """
+        def _to_mask(self, polarities, width):
+            mask = sum(
+                1 << i for i, p in enumerate(polarities) if p == Polarity.FALLING
+            )
+            if len(polarities) != width:
+                self.log.warning(f"polarities :{polarities}, bit width: {width}, mask: 0x{mask:08x}")
+            return mask
+
         configuration = {
             "ip_hws": config.get(
                 key="ip_hws",
@@ -113,31 +144,31 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 key="trigger_output_width",
                 default_value=16 # 100ns
             ),
-            "trigger_polarity": config.get_array(
+            "trigger_polarity": self._to_mask(config.get_array(
                 key="trigger_polarity",
                 element_type=enum_type(Polarity),
-                default_value=[Polarity.RISING] *4
-            ),
-            "busy_polarity": config.get_array(
+                default_value=[Polarity.RISING] * self.n_in
+            ), self.n_in),
+            "busy_polarity": self._to_mask(config.get_array(
                 key="busy_polarity",
                 element_type=enum_type(Polarity),
-                default_value=[Polarity.RISING] *5
-            ),
+                default_value=[Polarity.RISING] * self.n_busy
+            ), self.n_busy),
             "busy_timeout": config.get_int(
                 key="busy_timeout",
                 default_value=0xFFFF
             ),
-            "trigger_input_width": config.get_int(
+            "trigger_input_width": config.get_array(
                 key="trigger_input_width",
-                default_value=4
+                default_value=[4] * self.n_in
             ),
             "t0_width": config.get_int(
                 key="t0_width",
                 default_value=16 # 100ns
             ),
-            "busy_input_width": config.get_int(
+            "busy_input_width": config.get_array(
                 key="busy_input_width",
-                default_value=1
+                default_value=[1] * self.n_busy
             )
         }
 
@@ -171,3 +202,5 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             raise RuntimeError(f"{address.name}: wrote 0x{value:02x}, read 0x{response:02x}")
 
         return check
+
+
