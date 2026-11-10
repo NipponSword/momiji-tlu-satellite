@@ -21,20 +21,19 @@ from constellation.core.commandmanager import cscp_requestable
 
 from . import __version__
 from . import rbcp
-from .registers import Addr, Ctrl, Stat
+from .registers import MomijiReg, Ctrl, Stat, N_CH_IN, N_CH_BUSY
 
 class Polarity(StrEnum):
     RISING = "rising"
     FALLING = "falling"
 
 class MomijiTLU(TransmitterSatellite, version=__version__):
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.file_path = Path(__file__).parent
         self.rbcp = None
         self.fw_version = None
-        self.n_in   = 4
-        self.n_busy = 5
 
     def do_initializing(self, config: Configuration) -> str:
         """
@@ -43,20 +42,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             2. configure, setup parameter from config.setdefault(...)
             3. apply
         """
-
-        # --- check firmware settings
-        self.fw_version = self.rbcp.read32(Addr.FW_VERSION)
-        self.n_in       = self.rbcp.read8(Addr.N_IN)
-        self.n_busy     = self.rbcp.read8(Addr.N_BUSY)
-
-        self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
-        self.log.info(f"N_IN       0x{self.n_in}")
-        self.log.info(f"N_BUSY     0x{self.n_busy}")
-
         # --- get configuration
         cfg = self._read_config(config)
 
-        # --- write configuration to RBCP regs
         if self.rbcp:
             self.rbcp.close()
 
@@ -64,22 +52,47 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             ip=cfg['ip_hws'],
             port=cfg['port_hws'],
         )
-        self._write_reg_and_check(Addr.DUT_MASK, cfg['dut_mask'], 8)
-        self._write_reg_and_check(Addr.BLOCK_MASK, cfg['block_mask'], 8)
-        self._write_reg_and_check(Addr.LUT, cfg['trigger_input_logic'], 64)
-        self._write_reg_and_check(Addr.TRG_O_WIDTH, cfg['trigger_output_width'], 8)
-        self._write_reg_and_check(Addr.TRG_INVERT, cfg['trigger_polarity'], 8)
-        self._write_reg_and_check(Addr.BUSY_INVERT, cfg['busy_polarity'], 8)
-        self._write_reg_and_check(Addr.BUSY_TIMEOUT, cfg['busy_timeout'], 16)
-        self._write_reg_and_check(Addr.T0_WIDTH, cfg['t0_width'], 8)
-        for i in range(self.n_in):
-            self._write_reg_and_check(Addr.TRG_I_WIDTH + i, cfg['trigger_input_width'], 8)
-        for i in range(self.n_busy):
-            self._write_reg_and_check(Addr.BUSY_WIDTH + i, cfg['busy_input_width'], 8)
+
+        # --- check firmware settings
+        self.fw_version = self.read_reg(MomijiReg.FW_VERSION)
+        n_in            = self.read_reg(MomijiReg.N_IN)
+        n_busy          = self.read_reg(MomijiReg.N_BUSY)
+
+        if (n_in, n_busy) != (N_CH_IN, N_CH_BUSY):
+            raise RuntimeError(f"FW has N_IN={n_in}, N_BUSY={n_busy}, satellite expects {N_CH_IN}/{N_CH_BUSY}")
+
+        self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
+        self.log.info(f"N_IN       {n_in}")
+        self.log.info(f"N_BUSY     {n_busy}")
+        self.log.info(f"ID check PASSED 😊")
+
+        # --- write configuration to RBCP regs
+        self.write_reg_and_check(MomijiReg.DUT_MASK, cfg['dut_mask'])
+        self.write_reg_and_check(MomijiReg.BLOCK_MASK, cfg['block_mask'])
+        self.write_reg_and_check(MomijiReg.LUT, cfg['trigger_input_logic'])
+        self.write_reg_and_check(MomijiReg.TRG_O_WIDTH, cfg['trigger_output_width'])
+        self.write_reg_and_check(MomijiReg.TRG_INVERT, cfg['trigger_polarity'])
+        self.write_reg_and_check(MomijiReg.BUSY_INVERT, cfg['busy_polarity'])
+        self.write_reg_and_check(MomijiReg.BUSY_TIMEOUT, cfg['busy_timeout'])
+        self.write_reg_and_check(MomijiReg.T0_WIDTH, cfg['t0_width'])
+        
+        for i in range(n_in):
+            self.write_reg_and_check(
+                MomijiReg.TRG_I_WIDTH,
+                cfg['trigger_input_width'][i],
+                ch=i)
+        for i in range(n_busy):
+            self.write_reg_and_check(
+                MomijiReg.BUSY_WIDTH,
+                cfg['busy_input_width'][i],
+                ch=i)
+
+        self.log.info(f"All configuration have been written 😊")
 
         # --- apply 
-        self.rbcp.write(Addr.CTRL, Ctrl.APPLY) #TODO: how to check applied?
-
+        self.write_reg(MomijiReg.CTRL, Ctrl.APPLY)
+        self.log.info(f"APPLY")
+        
         # --- complete initializing
         return "Do initializing complete"
 
@@ -111,7 +124,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         """
         Reads and checks Constellation configuration
         """
-        def _to_mask(self, polarities, width):
+        def _to_mask(polarities, width):
             mask = sum(
                 1 << i for i, p in enumerate(polarities) if p == Polarity.FALLING
             )
@@ -144,23 +157,27 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 key="trigger_output_width",
                 default_value=16 # 100ns
             ),
-            "trigger_polarity": self._to_mask(config.get_array(
+            "trigger_polarity": _to_mask(config.get_array(
                 key="trigger_polarity",
                 element_type=enum_type(Polarity),
-                default_value=[Polarity.RISING] * self.n_in
-            ), self.n_in),
-            "busy_polarity": self._to_mask(config.get_array(
+                default_value=[Polarity.RISING] * N_CH_IN
+            ), N_CH_IN),
+            "busy_polarity": _to_mask(config.get_array(
                 key="busy_polarity",
                 element_type=enum_type(Polarity),
-                default_value=[Polarity.RISING] * self.n_busy
-            ), self.n_busy),
+                default_value=[Polarity.RISING] * N_CH_BUSY
+            ), N_CH_BUSY),
+            "trigger_edge_enable": config.get_int(
+                key="trigger_edge_enable",
+                default_value=0x0F
+            ),
             "busy_timeout": config.get_int(
                 key="busy_timeout",
                 default_value=0xFFFF
             ),
             "trigger_input_width": config.get_array(
                 key="trigger_input_width",
-                default_value=[4] * self.n_in
+                default_value=[4] * N_CH_IN
             ),
             "t0_width": config.get_int(
                 key="t0_width",
@@ -168,7 +185,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             ),
             "busy_input_width": config.get_array(
                 key="busy_input_width",
-                default_value=[1] * self.n_busy
+                default_value=[1] * N_CH_BUSY
             )
         }
 
@@ -177,30 +194,18 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return configuration
 
-    def _write_reg_and_check(self, address: Addr, value: int, bit: int = 8) -> bool:
+    def write_reg_and_check(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
         
-        check = False
+        self.write_reg(reg, value, ch)
+        response = self.read_reg(reg, ch)
 
-        match bit:
-            case 8:
-                self.rbcp.write8(address, value)
-                response = self.rbcp.read8(address)
-            case 16:
-                self.rbcp.write16(address, value)
-                response = self.rbcp.read16(address)
-            case 64:
-                self.rbcp.write(address, value.to_bytes(8, "big"))
-                response = self.rbcp.read64(address)
-            case _:
-                raise ValueError("Incorrect bit width")
-        
-        check = (value == response)
-
-        if check:
-            self.log.info(f"Write {value} to {address.name}")
+        if response == value:
+            self.log.info(f"{reg.name}[{ch}]: wrote 0x{value}:02x")
         else:
-            raise RuntimeError(f"{address.name}: wrote 0x{value:02x}, read 0x{response:02x}")
+            raise RuntimeError(f"{reg.name}: wrote 0x{value:02x}, read 0x{response:02x}")
 
-        return check
-
-
+    def write_reg(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
+        self.rbcp.write_uint(reg.addr_at(ch), value, reg.n_bytes)
+    
+    def read_reg(self, reg: MomijiReg, ch: int = 0) -> int:
+        return self.rbcp.read_uint(reg.addr_at(ch), reg.n_bytes)
