@@ -8,6 +8,7 @@ from enum import Enum, IntFlag, unique
 # --- Fixed parameter，don't change
 N_CH_IN    = 4
 N_CH_BUSY  = 5
+EVT_BYTES  = 24
 
 # --- Register class
 @unique
