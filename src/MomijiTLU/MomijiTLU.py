@@ -12,8 +12,8 @@ from typing import Any
 
 from constellation.core.configuration import Configuration, enum_type
 from constellation.core.transmitter_satellite import TransmitterSatellite
-from constellation.core.monitoring import schedule_metric
-from constellation.core.commandmanager import cscp_requestable
+# from constellation.core.monitoring import schedule_metric
+# from constellation.core.commandmanager import cscp_requestable
 
 from . import __version__
 from . import rbcp
@@ -32,7 +32,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
     
     Attributes:
         fw_version (int): firmware version of the board
-        n_sent (Path): the number of data sent to receiver satellite
+        n_sent (int): the number of data sent to receiver satellite
         cfg (dict): dict derived from constellation.core.configuration 
     """
 
@@ -84,7 +84,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
         self.log.info(f"N_IN       {n_in}")
         self.log.info(f"N_BUSY     {n_busy}")
-        self.log.info(f"ID check PASSED 😊")
+        self.log.info( "ID check PASSED 😊")
 
         # --- write configuration to RBCP regs
         self.write_reg_and_check(MomijiReg.DUT_MASK, self.cfg['dut_mask'])
@@ -108,11 +108,11 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 self.cfg['busy_input_width'][i],
                 ch=i)
 
-        self.log.info(f"All configuration have been written 😊")
+        self.log.info("All configuration have been written 😊")
 
         # --- apply 
         self.write_reg(MomijiReg.CTRL, Ctrl.APPLY)
-        self.log.info(f"APPLY")
+        self.log.info("APPLY")
         
         return "Do initializing complete"
 
@@ -164,21 +164,22 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 (self.cfg['ip_hws'], self.cfg['port_tcp']),
                 timeout = 5
                 )
-            except OSError as e:
-                raise RuntimeError(
-                f"cannot connect TCP. Old connecton still open? or the ip/port is wrong"
-                ) from e
+        except OSError as e:
+            raise RuntimeError(
+                "Cannot connect TCP. Old connection still open? or the ip/port is wrong"
+            ) from e
+
+        # --- reset data buffer
+        self._buf = bytearray()
+        self.n_sent = 0
         
         # --- start trigger + T0 sync
         try:
             self.tcp_sock.settimeout(0.2)
             self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
         except Exception:
+            raise RuntimeError("TCP/RBCP connection failed")
             self._close_tcp()
-
-        # --- reset data buffer
-        self._buf = bytearray()
-        self.n_sent = 0
         
         # --- set begin-of-run tags
         self.bor["firmware_version"] = self.fw_version
@@ -235,7 +236,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         n_in_hit  = [self.read_reg(MomijiReg.N_IN_HIT, ch=i) for i in range(N_CH_IN)]
 
         if not n_accept == self.n_sent:
-            self.log.warning(f"n_accept != n_sent. Check quality")
+            self.log.warning(f"n_accept={n_accept} != n_sent={self.n_sent}. Check quality")
         
         self.eor["n_accept"]  = n_accept
         self.eor["n_drop"]    = n_drop
@@ -413,7 +414,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self._send_event(self._buf[k:k + EVT_BYTES])
         
         del self._buf[:evt_in_buf * EVT_BYTES]
-        self.n_sent += 1
 
         return len(chunk)
 
@@ -452,11 +452,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         # ---- send evt data
         self.send_data_record(data_record)
+        self.n_sent += 1
 
     def _close_tcp(self) -> None: 
         """safely close TCP
         """
-        
+
         if self.tcp_sock is not None:
             self.tcp_sock.close()
             self.tcp_sock = None
