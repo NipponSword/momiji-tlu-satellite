@@ -5,11 +5,12 @@ SPDX-License-Identifier: EUPL-1.2
 
 from enum import Enum, IntFlag, unique
 
-# --- Fixed parameter，don't change
+# --- fixed parameter，don't change
 N_CH_IN    = 4
 N_CH_BUSY  = 5
+EVT_BYTES  = 24
 
-# --- Register class
+# --- register class
 @unique
 class MomijiReg(Enum):
 #   NAME            = (addr, bytes, ch   )
@@ -45,14 +46,14 @@ class MomijiReg(Enum):
             raise IndexError(f"{self.name}[{ch}]")
         return self.addr + ch * self.n_bytes
 
-# --- Control bit address
+# --- control bit address
 class Ctrl(IntFlag):
     RUN_START       = 0x01
     RUN_STOP        = 0x02
     APPLY           = 0x04
     SNAPSHOT        = 0x08
 
-# --- Status monitoring bit address
+# --- status monitoring bit address
 class Stat(IntFlag):
     RUNNING         = 0x01
     LOCK            = 0x02
