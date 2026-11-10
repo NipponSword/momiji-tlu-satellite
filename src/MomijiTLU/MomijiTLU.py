@@ -33,6 +33,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.cfg = None
         self.fw_version = None
         self.buf = bytearray()
+        self.n_sent = 0
 
     def do_initializing(self, config: Configuration) -> str:
         """
@@ -106,10 +107,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         """
         close TCP sockets
         """
-        if self.tcp_sock is not None:
-            self.tcp_sock.close()
-            self.tcp_sock = None
-
+        self._close_tcp()
         return "Do landing complete"
 
     def do_starting(self, run_identifier: str = None) -> str:
@@ -117,23 +115,32 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         connect to tcp, then start run
         """
         # --- create TCP socket
-        self.tcp_sock = socket.create_connection(
-            (self.cfg['ip_hws'], self.cfg['port_tcp']),
-            timeout = 5
-            )
-        self.tcp_sock.settimeout(0.2)
+        try:
+            self.tcp_sock = socket.create_connection(
+                (self.cfg['ip_hws'], self.cfg['port_tcp']),
+                timeout = 5
+                )
+            except OSError as e:
+                raise RuntimeError(
+                f"cannot connect TCP. Old connecton still open? or the ip/port is wrong"
+                ) from e
+        
+        # --- start trigger + T0 sync
+        try:
+            self.tcp_sock.settimeout(0.2)
+            self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
+        except Exception:
+            self._close_tcp()
 
         # --- reset data buffer
         self.buf = bytearray()
-
+        self.n_sent = 0
+        
         # --- set begin-of-run tags
         self.bor["firmware_version"] = self.fw_version
         self.bor["eudaq_event"] = "TluRawDataEvent"
         self.bor["write_as_blocks"] = True
-
-        # --- start trigger + T0 sync
-        self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
-
+        
         return "Do starting complete"
     
     def do_run(self) -> str:
@@ -148,24 +155,24 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         
         # --- finish processing
         t_end = time.time() + 5
-        while not (self.read_red(MomijiReg.STATUS) & Stat.EMPTY) and time.time() < t_end:
+        while not (self.read_reg(MomijiReg.STATUS) & Stat.EMPTY) and time.time() < t_end:
             self._receive_and_send()
 
         while self._receive_and_send():
             pass
 
         if self.buf:
-            self.log.warning("{len(self.buf)} bytes left over (not a multiple of {EVT_BYTES})")
+            self.log.warning(f"{len(self.buf)} bytes left over (not a multiple of {EVT_BYTES})")
 
         # --- set end-of-run tags
         self.write_reg(MomijiReg.CTRL, Ctrl.SNAPSHOT)
         n_accept  = self.read_reg(MomijiReg.N_ACCEPT)
         n_drop    = self.read_reg(MomijiReg.N_DROP)
         n_timeout = self.read_reg(MomijiReg.N_TIMEOUT)
-        n_in_hit  = self.read_reg(MomijiReg.N_IN_HIT)
+        n_in_hit  = [self.read_reg(MomijiReg.N_IN_HIT, ch=i) for i in range(N_CH_IN)]
 
-        if not n_in_hit == n_accept + n_drop + n_timeout:
-            self.log.warning("n_in_hit is not n_acc + n_drp + n_timeout. Check quality")
+        if not n_accept == self.n_sent:
+            self.log.warning(f"n_accept != n_sent. Check quality")
         
         self.eor["n_accept"]  = n_accept
         self.eor["n_drop"]    = n_drop
@@ -173,7 +180,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.eor["n_in_hit"]  = n_in_hit
 
         # --- close TCP socket
-        self.tcp_sock.close()
+        self._close_tcp()
 
         return "Do stopping complete"
 
@@ -254,7 +261,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             ),
             "trigger_input_width": config.get_array(
                 key="trigger_input_width",
-                element_type=int
+                element_type=int,
                 default_value=[4] * N_CH_IN
             ),
             "t0_width": config.get_int(
@@ -263,7 +270,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             ),
             "busy_input_width": config.get_array(
                 key="busy_input_width",
-                element_type=int
+                element_type=int,
                 default_value=[1] * N_CH_BUSY
             )
         }
@@ -288,10 +295,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self._send_event(self.buf[k:k + EVT_BYTES])
 
         del self.buf[:evt_in_buf * EVT_BYTES]
+        self.n_sent += 1
+
         return len(chunk)
 
     def _send_event(self, evt: bytearray) -> None:
-        words = struct.unpack("<6I", evt)
+        words = struct.unpack(">6I", evt)
         timestamp = 25 * ((((words[0] & 0xFFFF) << 32) | words[1]) >> 2) # [ns]
         trigger_id = words[3]
 
@@ -308,7 +317,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             }
         )
         # --- payload
-        data_record.add_block(bytes(evt))
+        data_record.add_block(struct.pack("<6I", *words))
 
         # ---- send evt data
         self.send_data_record(data_record)
+
+    def _close_tcp(self) -> None: 
+        if self.tcp_sock is not None:
+            self.tcp_sock.close()
+            self.tcp_sock = None

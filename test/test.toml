@@ -1,3 +1,5 @@
 [MomijiTLU.tlu]
 ip_hws = "192.168.10.16"
 trigger_input_logic = 0xAAAA
+dut_mask = 1
+trigger_output_width = 255
