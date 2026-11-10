@@ -20,28 +20,48 @@ from . import rbcp
 from .registers import MomijiReg, Ctrl, Stat, N_CH_IN, N_CH_BUSY, EVT_BYTES
 
 class Polarity(StrEnum):
+    """Polarity definition
+    """
     RISING = "rising"
     FALLING = "falling"
 
 class MomijiTLU(TransmitterSatellite, version=__version__):
+    """ Momiji-TLU satellite
+
+    Main class of Momiji TLU, enabling to control the TLU, receive data, and send data
+    
+    Attributes:
+        fw_version (int): firmware version of the board
+        n_sent (Path): the number of data sent to receiver satellite
+        cfg (dict): dict derived from constellation.core.configuration 
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.file_path = Path(__file__).parent
+        self.n_sent = 0
         self.rbcp = None
         self.tcp_sock = None
         self.cfg = None
         self.fw_version = None
-        self.buf = bytearray()
-        self.n_sent = 0
+        self._buf = bytearray()
 
+    # =========================================
+    # Initilizing
+    # =========================================
     def do_initializing(self, config: Configuration) -> str:
+        """initializing, get configuration and apply
+
+        Args:
+            config (Configuration): toml configuration
+
+        Raises:
+            RuntimeError: firmware ID is not same as expected
+
+        Returns:
+            str: "Do initializing complete"
         """
-        initialize tlu:
-            1. read FW_VERSION through RBCP register
-            2. configure, setup parameter from config.setdefault(...)
-            3. apply
-        """
+
         # --- get configuration
         self.cfg = self._read_config(config)
 
@@ -94,26 +114,50 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.write_reg(MomijiReg.CTRL, Ctrl.APPLY)
         self.log.info(f"APPLY")
         
-        # --- complete initializing
         return "Do initializing complete"
 
+    # =========================================
+    # Launching
+    # =========================================
     def do_launching(self) -> str:
+        """launching, just here
+
+        Returns:
+            str: "Do launching complete"
         """
-        do not anything
-        """
+
         return "Do launching complete"
 
+    # =========================================
+    # Landing
+    # =========================================
     def do_landing(self) -> str:
+        """landing, close TCP
+
+        Returns:
+            str: _description_
         """
-        close TCP sockets
-        """
+        # --- close TCP
         self._close_tcp()
+
         return "Do landing complete"
 
+    # =========================================
+    # Starting
+    # =========================================
     def do_starting(self, run_identifier: str = None) -> str:
+        """starting, connect to TCP, then start triggering
+
+        Args:
+            run_identifier (str, optional): from Constellation core. Defaults to None.
+
+        Raises:
+            RuntimeError: If error for some reason, close TCP safely
+
+        Returns:
+            str: "Do starting complete"
         """
-        connect to tcp, then start run
-        """
+
         # --- create TCP socket
         try:
             self.tcp_sock = socket.create_connection(
@@ -133,23 +177,42 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self._close_tcp()
 
         # --- reset data buffer
-        self.buf = bytearray()
+        self._buf = bytearray()
         self.n_sent = 0
         
         # --- set begin-of-run tags
         self.bor["firmware_version"] = self.fw_version
         self.bor["eudaq_event"] = "TluRawDataEvent"
         self.bor["write_as_blocks"] = True
-        
+
         return "Do starting complete"
-    
+
+    # =========================================
+    # Run
+    # =========================================
     def do_run(self) -> str:
+        """running until stop requested
+
+        Returns:
+            str: "Do running complete"
+        """
+
         # --- receive data and send until stop
         while not self.stop_requested():
             self._receive_and_send()
+
         return "Do running complete"
 
+    # =========================================
+    # Stopping
+    # =========================================
     def do_stopping(self) -> str:
+        """stopping, safly closing FIFO and socket
+
+        Returns:
+            str: "Do stopping complete"
+        """
+
         # --- stop run
         self.write_reg(MomijiReg.CTRL, Ctrl.RUN_STOP)
         
@@ -161,8 +224,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         while self._receive_and_send():
             pass
 
-        if self.buf:
-            self.log.warning(f"{len(self.buf)} bytes left over (not a multiple of {EVT_BYTES})")
+        if self._buf:
+            self.log.warning(f"{len(self._buf)} bytes left over (not a multiple of {EVT_BYTES})")
 
         # --- set end-of-run tags
         self.write_reg(MomijiReg.CTRL, Ctrl.SNAPSHOT)
@@ -184,26 +247,68 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return "Do stopping complete"
 
+    # =========================================
+    # Member functions
+    # =========================================
     def write_reg_and_check(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
+        """ write value to register, and check if the response is same as input
+
+        Args:
+            reg (MomijiReg): target register
+            value (int): input value
+            ch (int, optional): which ch. Defaults to 0.
+
+        Raises:
+            RuntimeError: If the check failed
+        """
         
+        # --- write to register
         self.write_reg(reg, value, ch)
+
+        # --- see value at shadow register
         response = self.read_reg(reg, ch)
 
+        # --- check
         if response == value:
             self.log.info(f"{reg.name}[{ch}]: wrote 0x{value:02x}")
         else:
             raise RuntimeError(f"{reg.name}: wrote 0x{value:02x}, read 0x{response:02x}")
 
     def write_reg(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
+        """write value to register
+
+        Args:
+            reg (MomijiReg): target register
+            value (int): input value
+            ch (int, optional): which ch. Defaults to 0.
+        """
+
         self.rbcp.write_uint(reg.addr_at(ch), value, reg.n_bytes)
     
     def read_reg(self, reg: MomijiReg, ch: int = 0) -> int:
+        """read value from register
+
+        Args:
+            reg (MomijiReg): target register
+            ch (int, optional): which ch. Defaults to 0.
+
+        Returns:
+            int: result
+        """
+
         return self.rbcp.read_uint(reg.addr_at(ch), reg.n_bytes)
 
     def _read_config(self, config: Configuration) -> dict[str, Any]:
+        """read configuration saved in Constellation, and dump it to dict
+
+        Args:
+            config (Configuration): original configuration
+
+        Returns:
+            dict[str, Any]: dumped cfg
         """
-        Reads and checks Constellation configuration
-        """
+
+        # --- rewrite polarity setting to 1byte words 
         def _to_mask(polarities, width):
             mask = sum(
                 1 << i for i, p in enumerate(polarities) if p == Polarity.FALLING
@@ -212,6 +317,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 self.log.warning(f"polarities :{polarities}, bit width: {width}, mask: 0x{mask:08x}")
             return mask
 
+        # --- read config
         configuration = {
             "ip_hws": config.get(
                 key="ip_hws",
@@ -281,6 +387,16 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         return configuration
 
     def _receive_and_send(self) -> int:
+        """receive word from TCP, and send it to receiver satellite
+
+        Raises:
+            RuntimeError: TCP connection closed
+
+        Returns:
+            int: If all data have read, 0.
+        """
+
+        # --- receive data from TCP
         try:
             chunk = self.tcp_sock.recv(65536)
         except socket.timeout:
@@ -288,22 +404,37 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         if not chunk:
             raise RuntimeError("TCP connection closed by the board")
         
-        self.buf += chunk
+        # --- save to buffer
+        self._buf += chunk
 
-        evt_in_buf = len(self.buf) // EVT_BYTES
+        # --- send data per 24 bytes
+        evt_in_buf = len(self._buf) // EVT_BYTES
         for k in range(0, evt_in_buf * EVT_BYTES, EVT_BYTES):
-            self._send_event(self.buf[k:k + EVT_BYTES])
-
-        del self.buf[:evt_in_buf * EVT_BYTES]
+            self._send_event(self._buf[k:k + EVT_BYTES])
+        
+        del self._buf[:evt_in_buf * EVT_BYTES]
         self.n_sent += 1
 
         return len(chunk)
 
     def _send_event(self, evt: bytearray) -> None:
+        """send an event
+
+        Args:
+            evt (bytearray): original data from TCP
+
+        Raises:
+            RuntimeError: The data is destroyed
+        """
+
+        # --- unpack bytearray to 6 word (4 byte per word)
         words = struct.unpack(">6I", evt)
+
+        # --- reconstruct timing info
         timestamp = 25 * ((((words[0] & 0xFFFF) << 32) | words[1]) >> 2) # [ns]
         trigger_id = words[3]
 
+        # --- check
         if words[5] != 0:
             raise RuntimeError("The data stream crashed 😡!!")
 
@@ -323,6 +454,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.send_data_record(data_record)
 
     def _close_tcp(self) -> None: 
+        """safely close TCP
+        """
+        
         if self.tcp_sock is not None:
             self.tcp_sock.close()
             self.tcp_sock = None
