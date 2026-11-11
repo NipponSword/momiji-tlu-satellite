@@ -181,9 +181,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         try:
             self.tcp_sock.settimeout(0.2)
             self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
-        except Exception:
+        except Exception as e:
             self._close_tcp()
-            raise RuntimeError("TCP/RBCP connection failed")
+            raise RuntimeError("TCP/RBCP connection failed") from e
 
         # --- set begin-of-run tags
         self.bor["firmware_version"] = self.fw_version
