@@ -7,12 +7,14 @@ from enum import StrEnum
 import struct
 import time
 import socket
+import threading
 from pathlib import Path
 from typing import Any
 
 from constellation.core.configuration import Configuration, enum_type
 from constellation.core.transmitter_satellite import TransmitterSatellite
-# from constellation.core.monitoring import schedule_metric
+from constellation.core.monitoring import schedule_metric
+from constellation.core.protocol.cscp1 import SatelliteState
 # from constellation.core.commandmanager import cscp_requestable
 
 from . import __version__
@@ -44,10 +46,14 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.tcp_sock = None
         self.cfg = None
         self.fw_version = None
+        self._counters = {}
+        self._rate_prev = {}
+        self._counters_time = 0
+        self._rbcp_lock = threading.RLock()
         self._buf = bytearray()
 
     # =========================================
-    # Initilizing
+    # Constellation derived methods
     # =========================================
     def do_initializing(self, config: Configuration) -> str:
         """initializing, get configuration and apply
@@ -116,9 +122,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         
         return "Do initializing complete"
 
-    # =========================================
-    # Launching
-    # =========================================
     def do_launching(self) -> str:
         """launching, just here
 
@@ -128,9 +131,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return "Do launching complete"
 
-    # =========================================
-    # Landing
-    # =========================================
     def do_landing(self) -> str:
         """landing, close TCP
 
@@ -142,9 +142,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return "Do landing complete"
 
-    # =========================================
-    # Starting
-    # =========================================
     def do_starting(self, run_identifier: str = None) -> str:
         """starting, connect to TCP, then start triggering
 
@@ -169,17 +166,18 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 "Cannot connect TCP. Old connection still open? or the ip/port is wrong"
             ) from e
 
-        # --- reset data buffer
-        self._buf = bytearray()
+        # --- reset
         self.n_sent = 0
+        self._rate_prev = {}
+        self._buf = bytearray()
         
         # --- start trigger + T0 sync
         try:
             self.tcp_sock.settimeout(0.2)
             self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
         except Exception:
-            raise RuntimeError("TCP/RBCP connection failed")
             self._close_tcp()
+            raise RuntimeError("TCP/RBCP connection failed")
         
         # --- set begin-of-run tags
         self.bor["firmware_version"] = self.fw_version
@@ -188,9 +186,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return "Do starting complete"
 
-    # =========================================
-    # Run
-    # =========================================
     def do_run(self) -> str:
         """running until stop requested
 
@@ -204,9 +199,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return "Do running complete"
 
-    # =========================================
-    # Stopping
-    # =========================================
     def do_stopping(self) -> str:
         """stopping, safly closing FIFO and socket
 
@@ -229,19 +221,15 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self.log.warning(f"{len(self._buf)} bytes left over (not a multiple of {EVT_BYTES})")
 
         # --- set end-of-run tags
-        self.write_reg(MomijiReg.CTRL, Ctrl.SNAPSHOT)
-        n_accept  = self.read_reg(MomijiReg.N_ACCEPT)
-        n_drop    = self.read_reg(MomijiReg.N_DROP)
-        n_timeout = self.read_reg(MomijiReg.N_TIMEOUT)
-        n_in_hit  = [self.read_reg(MomijiReg.N_IN_HIT, ch=i) for i in range(N_CH_IN)]
+        counters = self._get_counters()
 
-        if not n_accept == self.n_sent:
-            self.log.warning(f"n_accept={n_accept} != n_sent={self.n_sent}. Check quality")
+        if not counters['n_accept'] == self.n_sent:
+            self.log.warning(f"n_accept={counters['n_accept']} != n_sent={self.n_sent}. Check quality")
         
-        self.eor["n_accept"]  = n_accept
-        self.eor["n_drop"]    = n_drop
-        self.eor["n_timeout"] = n_timeout
-        self.eor["n_in_hit"]  = n_in_hit
+        self.eor['n_accept']  = counters['n_accept']
+        self.eor['n_drop']    = counters['n_drop']
+        self.eor['n_timeout'] = counters['n_timeout']
+        self.eor['n_in_hit']  = counters['n_in_hit']
 
         # --- close TCP socket
         self._close_tcp()
@@ -249,7 +237,39 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         return "Do stopping complete"
 
     # =========================================
-    # Member functions
+    # Metrics
+    # =========================================
+    @schedule_metric("", 2, [SatelliteState.RUN])
+    def event_sent(self) -> int:
+        return self.n_sent
+
+    @schedule_metric("Hz", 2, [SatelliteState.RUN])
+    def trigger_rate(self) -> float | None:
+        return self._rate('n_accept')
+
+    @schedule_metric("Hz", 2, [SatelliteState.RUN])
+    def drop_rate(self) -> float | None:
+        return self._rate('n_drop')
+
+    @schedule_metric("", 2, [SatelliteState.RUN])
+    def n_timeout(self) -> float | None:
+        return self._get_counters()['n_timeout']
+
+    @schedule_metric("Hz", 2, [SatelliteState.RUN])
+    def input_rate(self) -> float | None:
+        return self._rate('n_in_hit')
+
+    def _rate(self, key: str, ch: int = 0) -> float | None:
+        counters = self._get_counters()
+        prev = self._rate_prev.get(key)
+        self._rate_prev[key] = (counters[key][ch], counters["ts_now"])
+
+        if prev is None or counters["ts_now"] == prev[1]:
+            return None
+        return (counters[key] - prev[0]) / ((counters["ts_now"] - prev[1]) * 6.25e-9)
+
+    # =========================================
+    # Utils
     # =========================================
     def write_reg_and_check(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
         """ write value to register, and check if the response is same as input
@@ -283,8 +303,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             value (int): input value
             ch (int, optional): which ch. Defaults to 0.
         """
-
-        self.rbcp.write_uint(reg.addr_at(ch), value, reg.n_bytes)
+        with self._rbcp_lock:
+            self.rbcp.write_uint(reg.addr_at(ch), value, reg.n_bytes)
     
     def read_reg(self, reg: MomijiReg, ch: int = 0) -> int:
         """read value from register
@@ -296,8 +316,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         Returns:
             int: result
         """
-
-        return self.rbcp.read_uint(reg.addr_at(ch), reg.n_bytes)
+        with self._rbcp_lock:
+            return self.rbcp.read_uint(reg.addr_at(ch), reg.n_bytes)
 
     def _read_config(self, config: Configuration) -> dict[str, Any]:
         """read configuration saved in Constellation, and dump it to dict
@@ -461,3 +481,20 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         if self.tcp_sock is not None:
             self.tcp_sock.close()
             self.tcp_sock = None
+
+    def _get_counters(self, time_to_update: float = 0.5) -> dict:
+        with self._rbcp_lock:
+            now = time.monotonic()
+            if now - self._counters_time > time_to_update:
+
+                self.write_reg(MomijiReg.CTRL, Ctrl.SNAPSHOT)
+                self._counters = {
+                    "n_accept"  : self.read_reg(MomijiReg.N_ACCEPT),
+                    "n_drop"    : self.read_reg(MomijiReg.N_DROP),
+                    "n_timeout" : self.read_reg(MomijiReg.N_TIMEOUT),
+                    "n_in_hit"  : [self.read_reg(MomijiReg.N_IN_HIT, ch=i) for i in range(N_CH_IN)],
+                    "ts_now"    : self.read_reg(MomijiReg.TS_NOW)
+                }
+
+                self._counters_time = now
+            return self._counters
