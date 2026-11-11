@@ -13,9 +13,7 @@ def main(args=None):
     """MomijiTLU satellite"""
 
     # Get a dict of the parsed arguments
-    parser = TransmitterSatelliteArgumentParser(
-        description=main.__doc__,
-        version=MomijiTLU._satellite_version)
+    parser = TransmitterSatelliteArgumentParser(description=main.__doc__, version=MomijiTLU._satellite_version)
     args = vars(parser.parse_args(args))
 
     # Set up logging

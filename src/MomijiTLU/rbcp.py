@@ -32,21 +32,23 @@ import struct
 import sys
 
 # --- default configuration
-DEFAULT_IP      = "192.168.10.16"
-DEFAULT_PORT    = 4660
+DEFAULT_IP = "192.168.10.16"
+DEFAULT_PORT = 4660
 
-CMD_READ        = 0xC0
-CMD_WRITE       = 0x80
-FLAG_ACK        = 0x08
-FLAG_BUS_ERR    = 0x01
+CMD_READ = 0xC0
+CMD_WRITE = 0x80
+FLAG_ACK = 0x08
+FLAG_BUS_ERR = 0x01
+
 
 # --- Exception handling
 class RbcpError(Exception):
     pass
 
+
 # --- RBCP
 class Rbcp:
-    # --- initialize 
+    # --- initialize
     def __init__(self, ip=DEFAULT_IP, port=DEFAULT_PORT, timeout=1.0, retries=3):
         self.addr = (ip, port)
         self.retries = retries
@@ -75,7 +77,7 @@ class Rbcp:
                 while True:
                     ack, _ = self.sock.recvfrom(8 + 255)
                     if len(ack) >= 8 and ack[2] == self.pkt_id:
-                        break          # ignore late ACKs of earlier tries
+                        break  # ignore late ACKs of earlier tries
             except socket.timeout:
                 continue
 
@@ -84,9 +86,8 @@ class Rbcp:
             if not flag & FLAG_ACK:
                 raise RbcpError("reply is not an ACK packet: 0x%02x" % flag)
             if flag & FLAG_BUS_ERR:
-                raise RbcpError("bus error at 0x%08x (done %d of %d bytes)"
-                                % (addr, ack[3], length))
-            return ack[8:8 + length]
+                raise RbcpError("bus error at 0x%08x (done %d of %d bytes)" % (addr, ack[3], length))
+            return ack[8 : 8 + length]
 
         raise RbcpError("no ACK from %s:%d (addr 0x%08x)" % (self.addr + (addr,)))
 
@@ -105,13 +106,26 @@ class Rbcp:
     def write_uint(self, addr, value, nbytes):
         self.write(addr, value.to_bytes(nbytes, "big"))
 
-    def read8(self, addr):   return self.read_uint(addr, 1)
-    def read16(self, addr):  return self.read_uint(addr, 2)
-    def read32(self, addr):  return self.read_uint(addr, 4)
-    def read48(self, addr):  return self.read_uint(addr, 6)
-    def read64(self, addr):  return self.read_uint(addr, 8)
-    def write8(self, addr, v):  self.write_uint(addr, v, 1)
-    def write16(self, addr, v): self.write_uint(addr, v, 2)
+    def read8(self, addr):
+        return self.read_uint(addr, 1)
+
+    def read16(self, addr):
+        return self.read_uint(addr, 2)
+
+    def read32(self, addr):
+        return self.read_uint(addr, 4)
+
+    def read48(self, addr):
+        return self.read_uint(addr, 6)
+
+    def read64(self, addr):
+        return self.read_uint(addr, 8)
+
+    def write8(self, addr, v):
+        self.write_uint(addr, v, 1)
+
+    def write16(self, addr, v):
+        self.write_uint(addr, v, 2)
 
 
 def _main(argv):
