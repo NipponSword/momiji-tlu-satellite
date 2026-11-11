@@ -40,18 +40,33 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        # --- members
         self.file_path = Path(__file__).parent
         self.n_sent = 0
         self.rbcp = None
         self.tcp_sock = None
         self.cfg = None
         self.fw_version = None
+
+        # --- secret
         self._counters = {}
         self._rate_prev = {}
         self._counters_time = 0
         self._rbcp_lock = threading.RLock()
         self._buf = bytearray()
 
+        # --- register ch-by-ch metric
+        for ch in range(N_CH_IN):
+            self.register_scheduled_metric(
+                name=f"input_rate_{ch}",
+                unit="Hz",
+                description=f"Hit rate of trigger input {ch}",
+                interval=2,
+                value_cb=lambda ch=ch: self._input_rate(ch),
+                allowed_states=[SatelliteState.RUN],
+        )
+            
     # =========================================
     # Constellation derived methods
     # =========================================
@@ -221,7 +236,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self.log.warning(f"{len(self._buf)} bytes left over (not a multiple of {EVT_BYTES})")
 
         # --- set end-of-run tags
-        counters = self._get_counters()
+        counters = self._get_counters(time_to_update=0)
 
         if not counters['n_accept'] == self.n_sent:
             self.log.warning(f"n_accept={counters['n_accept']} != n_sent={self.n_sent}. Check quality")
@@ -255,14 +270,20 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
     def n_timeout(self) -> float | None:
         return self._get_counters()['n_timeout']
 
-    @schedule_metric("Hz", 2, [SatelliteState.RUN])
-    def input_rate(self) -> float | None:
-        return self._rate('n_in_hit')
+    def _input_rate(self, ch: int) -> float | None:
+        counters = self._get_counters()
+        key = f'n_in_hit_{ch}'
+        prev = self._rate_prev.get(key)
+        self._rate_prev[key] = (counters['n_in_hit'][ch], counters["ts_now"])
 
-    def _rate(self, key: str, ch: int = 0) -> float | None:
+        if prev is None or counters["ts_now"] == prev[1]:
+            return None
+        return (counters['n_in_hit'][ch] - prev[0]) / ((counters["ts_now"] - prev[1]) * 6.25e-9)
+
+    def _rate(self, key: str) -> float | None:
         counters = self._get_counters()
         prev = self._rate_prev.get(key)
-        self._rate_prev[key] = (counters[key][ch], counters["ts_now"])
+        self._rate_prev[key] = (counters[key], counters["ts_now"])
 
         if prev is None or counters["ts_now"] == prev[1]:
             return None
