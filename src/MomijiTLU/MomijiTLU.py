@@ -65,7 +65,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 unit="Hz",
                 description=f"Hit rate of trigger input {ch}",
                 interval=2,
-                value_cb=lambda key="input_rate", ch=ch: self._input_rate(key, ch),
+                value_cb=lambda key="n_in_hit", ch=ch: self._rate(key, ch),
                 allowed_states=[SatelliteState.RUN],
             )
 
@@ -261,10 +261,10 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
     def n_timeout(self) -> float | None:
         return self._get_counters()["n_timeout"]
 
-    def _rate(self, key: str, ch: int = None) -> float | None:
+    def _rate(self, key: str, ch: int | None = None) -> float | None:
         counters = self._get_counters()
-        count    = counters[key][ch] if ch else counters[key]
-        key_name = f"{key}_{ch}" if ch else key
+        count    = counters[key][ch] if ch is not None else counters[key]
+        key_name = f"{key}_{ch}" if ch is not None else key
         prev = self._rate_prev.get(key_name)
         self._rate_prev[key_name] = (count, counters["ts_now"])
 
