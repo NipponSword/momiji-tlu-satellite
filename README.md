@@ -14,7 +14,7 @@ version: v0.1.0
 This is a detailed description of the satellite and its functionality.
 Possible dependencies are described alongside its features, potential pitfalls and other information.
 
-## Requirements
+## 📝 Requirements
 - Python >= 3.11 (tested: Python3.12, ConstellationDAQ 1.0.2
 - uv (or plain `python -m venv`+`pip`)
 - Momiji TLU board reachable over Ethernet
