@@ -30,15 +30,15 @@ source .venv/bin/activate
 ```
 Then, install satellite
 ```shell
-uv pip install -e .
+uv sync
 ```
 If you need constellation cli,
 ```shell
-uv pip install "ConstellationDAQ[cli]"
+uv sync --extra cli
 ```
 If you are a developer, to install ruff and basedpyright
 ```shell
-uv pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 ## 🚀 Usage
