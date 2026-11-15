@@ -45,6 +45,9 @@ dev = [
     "basedpyright",
     "ruff",
 ]
+cli = [
+    "ConstellationDAQ[cli]"
+]
 
 [tool.pyright]
 typeCheckingMode = "standard"
