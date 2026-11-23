@@ -1,5 +1,7 @@
 from enum import StrEnum
+
 from .trigger_board import N_CH_BUSY
+
 
 class BusyInterface(StrEnum):
     HANDSHAKE = "handshake"
@@ -17,7 +19,7 @@ def busy_masks(modes: list[BusyInterface]) -> tuple[int, int]:
     """
     if len(modes) != N_CH_BUSY:
         raise ValueError(f"need {N_CH_BUSY} entries, got{len(modes)}")
-    dut = sum(1 << k for k, m in enumerate(modes) if m is BusyInterface.HANDSHAKE)
-    block = sum(1 << k for k, m in enumerate(modes) if m is BusyInterface.VETO)
+    dut = sum(1 << k for k, m in enumerate(modes) if m == BusyInterface.HANDSHAKE)
+    block = sum(1 << k for k, m in enumerate(modes) if m == BusyInterface.VETO)
 
     return dut, block

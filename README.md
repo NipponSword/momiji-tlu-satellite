@@ -59,7 +59,7 @@ The following parameters are read and interpreted by this satellite. Parameters 
 | Parameter | Description | Type | Default Value |
 | --------- | ----------- | ---- | ------------- |
 | `trigger_logic` | Trigger logic for 4 ch input | Str | - |
-| `dut_mask` | Select busy ch from "handshake", "veto", "off" | list[Enum] | - |
+| `busy_interface` | Select busy ch from "handshake", "veto", "off" | list[Enum] | - |
 | `t0_width` | T0 signal width for Caribou | Int | `16` (100ns)|
 | `ip_hws` | IP address of HwS | Str | `192.168.10.16` |
 | `port_rbcp` | Port of RBCP connection | Int | `4660` |
@@ -79,6 +79,7 @@ The following parameters are read and interpreted by this satellite. Parameters 
 An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point
 
 ```toml
+[MomijiTLU.tlu]
 ip_hws = "192.168.10.16"
 trigger_input_logic = "CH1 and not CH2"
 busy_interface = ["handshake", "veto", "off", "off", "off"]

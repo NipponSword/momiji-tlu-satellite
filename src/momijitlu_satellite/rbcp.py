@@ -77,7 +77,7 @@ class Rbcp:
                     ack, _ = self.sock.recvfrom(8 + 255)
                     if len(ack) >= 8 and ack[2] == self.pkt_id:
                         break  # ignore late ACKs of earlier tries
-            except socket.timeout:
+            except TimeoutError:
                 continue
 
             flag = ack[1]

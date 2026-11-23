@@ -11,11 +11,10 @@ import threading
 import time
 
 from . import rbcp
-from .registers import EVT_BYTES, N_CH_IN, N_CH_BUSY, MomijiReg, Ctrl, Stat
+from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Ctrl, MomijiReg, Stat
 
 DEFAULT_IP = rbcp.DEFAULT_IP
 DEFAULT_PORT = rbcp.DEFAULT_PORT
-FW_VERSION = 0x2026_1130
 
 class TriggerBoard:
     """Momiji TLU hardware: RBCP registers (UDP) and event data (TCP)

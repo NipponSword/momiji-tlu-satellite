@@ -15,8 +15,8 @@ from constellation.core.protocol.cscp1 import SatelliteState
 from constellation.core.transmitter_satellite import TransmitterSatellite
 
 from . import __version__
-from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Stat
 from .busy_interface import BusyInterface, busy_masks
+from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Stat
 from .trigger_board import DEFAULT_IP, DEFAULT_PORT, TriggerBoard, decode_event, logic_to_lut
 
 
@@ -50,6 +50,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.cfg = None
 
         # --- secret
+        self._next_id = 0
         self._rate_prev = {}
         self._count_prev = {}
 
@@ -128,6 +129,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # --- reset
         self.n_sent = 0
         self.n_id_gap = 0
+        self._next_id = 0
         self._rate_prev = {}
         self._count_prev = {}
 
@@ -185,7 +187,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             self.log.warning(f"n_accept={counters['n_accept']} != n_sent={self.n_sent}. Check quality")
 
         if counters["n_timeout"]:
-            self.log.error(f"n_timeout={counters["n_timeout"]}: a DUT did not answer busy")
+            self.log.error(f"n_timeout={counters['n_timeout']}: a DUT did not answer busy")
 
         run_length_s = counters["ts_now"] * 6.25e-9          # TS はラン開始で 0
         n_trig = counters["n_accept"] + counters["n_drop"]
@@ -227,7 +229,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
     @schedule_metric("", 2, [SatelliteState.RUN])
     def n_timeout(self) -> float | None:
-        n_timeout = self._get_counters()["n_timeout"]
+        n_timeout = self.board.counters()["n_timeout"]
         prev = self._count_prev.get("n_timeout")
         if not (prev is None or n_timeout == prev):
             self.log.error(f"busy timeout ! n_timeout = {n_timeout}")
@@ -284,6 +286,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             "ip_hws": config.get(key="ip_hws"),
             "port_rbcp": config.get_int(key="port_rbcp"),
             "port_tcp": config.get_int(key="port_tcp"),
+            "trigger_logic_expr": config.get_str(key="trigger_logic"),
+            "trigger_logic": config.get(key="trigger_logic", return_type=logic_to_lut),
             "t0_width": config.get_int(key="t0_width"),
             "trigger_output_width": config.get_int(key="trigger_output_width"),
             "trigger_edge_enable": config.get_int(key="trigger_edge_enable"),
@@ -306,10 +310,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         dut_mask, block_mask = busy_masks(busy_interface)
         configuration["dut_mask"] = dut_mask
         configuration["block_mask"] = block_mask
-
-        # --- trigger logic
-        trigger_logic = config.get_str(key="trigger_logic")
-        configuration["trigger_logic"] = logic_to_lut(trigger_logic)
 
         return configuration
 
@@ -334,9 +334,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             evt (bytes): one 24-byte event from the board
         """
         trigger_id, timestamp, words = decode_event(evt)
-        if trigger_id != self.n_sent:
-            self.n_id_gap += 1
-            self.log.warning(f"trigger ID {trigger_id}, expected {self.n_sent}")
+
+        # --- check id is consistent as expected
+        if trigger_id - self._next_id != 0:
+            self.n_id_gap += trigger_id - self._next_id
+            self.log.warning(f"trigger ID {trigger_id}, expected {self._next_id}")
+        self._next_id = trigger_id + 1
 
         # --- meta record
         data_record = self.new_data_record(
