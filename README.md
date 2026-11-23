@@ -58,9 +58,8 @@ The following parameters are read and interpreted by this satellite. Parameters 
 
 | Parameter | Description | Type | Default Value |
 | --------- | ----------- | ---- | ------------- |
-| `dut_mask` | Select busy ch from DUT (used for handshake) | Int | - |
-| `block_mask` | Select busy ch for VETO  | Int | - |
-| `trigger_input_logic` | Trigger logic for 4 ch input (LUT) | Int | - |
+| `trigger_logic` | Trigger logic for 4 ch input | Str | - |
+| `dut_mask` | Select busy ch from "handshake", "veto", "off" | list[Enum] | - |
 | `t0_width` | T0 signal width for Caribou | Int | `16` (100ns)|
 | `ip_hws` | IP address of HwS | Str | `192.168.10.16` |
 | `port_rbcp` | Port of RBCP connection | Int | `4660` |
@@ -80,11 +79,10 @@ The following parameters are read and interpreted by this satellite. Parameters 
 An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point
 
 ```toml
-[MomijiTLU.tlu]
-dut_mask = 4b0001
-block_mask = 5b00100
-trigger_input_logic = 0xAAAA
-busy_input_width = [0, 0, 0, 0, 0]
+ip_hws = "192.168.10.16"
+trigger_input_logic = "CH1 and not CH2"
+busy_interface = ["handshake", "veto", "off", "off", "off"]
+trigger_output_width = 255
 ```
 
 ## 📉 Metrics
