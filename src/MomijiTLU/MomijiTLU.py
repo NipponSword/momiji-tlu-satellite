@@ -118,6 +118,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.write_reg_and_check(MomijiReg.BUSY_INVERT, self.cfg["busy_polarity"])
         self.write_reg_and_check(MomijiReg.TRG_EDGE_EN, self.cfg["trigger_edge_enable"])
         self.write_reg_and_check(MomijiReg.BUSY_TIMEOUT, self.cfg["busy_timeout"])
+        self.write_reg_and_check(MomijiReg.DT_TRG, self.cfg["dt_trigger"])
         self.write_reg_and_check(MomijiReg.T0_WIDTH, self.cfg["t0_width"])
 
         for i in range(n_in):
@@ -340,40 +341,51 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
                 self.log.warning(f"polarities :{polarities}, bit width: {width}, mask: 0x{mask:08x}")
             return mask
 
+        # --- default config
+        config.set_default(key="ip_hws", value="192.168.10.16")
+        config.set_default(key="port_rbcp", value=4660)
+        config.set_default(key="port_tcp", value=24)
+        config.set_default(key="t0_width", value=16)
+        config.set_default(key="trigger_output_width", value=16)
+        config.set_default(key="trigger_edge_enable", value=0x0F)
+        config.set_default(key="busy_timeout", value=0xFFFF)
+        config.set_default(key="dt_trigger", value=0)
+        config.set_default(key="trigger_input_width", value=[4] * N_CH_IN)
+        config.set_default(key="busy_input_width", value=[1]*N_CH_BUSY)
+        config.set_default(key="trigger_polarity", value=[Polarity.RISING] * N_CH_IN)
+        config.set_default(key="busy_polarity", value=[Polarity.RISING] * N_CH_BUSY)
+
         # --- read config
         configuration = {
-            "ip_hws": config.get(key="ip_hws", default_value="192.168.10.16"),
-            "port_rbcp": config.get_int(key="port_rbcp", default_value=4660),
-            "port_tcp": config.get_int(key="port_tcp", default_value=24),
-            "dut_mask": config.get_int(key="dut_mask", default_value=0x01),
-            "block_mask": config.get_int(key="block_mask", default_value=0x00),
-            "trigger_input_logic": config.get_int(key="trigger_input_logic", default_value=0xAAAA),
-            "trigger_output_width": config.get_int(
-                key="trigger_output_width",
-                default_value=16,  # 100ns
+            "ip_hws": config.get(key="ip_hws"),
+            "port_rbcp": config.get_int(key="port_rbcp"),
+            "port_tcp": config.get_int(key="port_tcp"),
+            "dut_mask": config.get_int(key="dut_mask"),
+            "block_mask": config.get_int(key="block_mask"),
+            "t0_width": config.get_int(key="t0_width"),
+            "trigger_input_logic": config.get_int(key="trigger_input_logic"),
+            "trigger_output_width": config.get_int(key="trigger_output_width"),
+            "trigger_edge_enable": config.get_int(key="trigger_edge_enable"),
+            "busy_timeout": config.get_int(key="busy_timeout"),
+            "dt_trigger": config.get_int(key="dt_trigger", max_val=0xFFFF),
+            "trigger_input_width": config.get_array(
+                key="trigger_input_width", element_type=int
+            ),
+            "busy_input_width": config.get_array(
+                key="busy_input_width", element_type=int
             ),
             "trigger_polarity": _to_mask(
                 config.get_array(
-                    key="trigger_polarity", element_type=enum_type(Polarity), default_value=[Polarity.RISING] * N_CH_IN
+                    key="trigger_polarity", element_type=enum_type(Polarity)
                 ),
                 N_CH_IN,
             ),
             "busy_polarity": _to_mask(
                 config.get_array(
-                    key="busy_polarity", element_type=enum_type(Polarity), default_value=[Polarity.RISING] * N_CH_BUSY
+                    key="busy_polarity", element_type=enum_type(Polarity)
                 ),
                 N_CH_BUSY,
             ),
-            "trigger_edge_enable": config.get_int(key="trigger_edge_enable", default_value=0x0F),
-            "busy_timeout": config.get_int(key="busy_timeout", default_value=0xFFFF),
-            "trigger_input_width": config.get_array(
-                key="trigger_input_width", element_type=int, default_value=[4] * N_CH_IN
-            ),
-            "t0_width": config.get_int(
-                key="t0_width",
-                default_value=16,  # 100ns
-            ),
-            "busy_input_width": config.get_array(key="busy_input_width", element_type=int, default_value=[1] * N_CH_BUSY),
         }
 
         # self.status_interval = config.get_float("status_interval")

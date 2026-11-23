@@ -31,6 +31,7 @@ class MomijiReg(Enum):
     BUSY_WIDTH = (0x48, 1, N_CH_BUSY)
     TRG_O_WIDTH = (0x50, 1)
     BUSY_TIMEOUT = (0x52, 2)
+    DT_TRG = (0x54, 2)
     N_ACCEPT = (0x80, 4)
     N_DROP = (0x84, 4)
     N_TIMEOUT = (0x88, 4)
