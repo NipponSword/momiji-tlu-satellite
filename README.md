@@ -81,7 +81,7 @@ An example configuration for this satellite which could be dropped into a Conste
 ```toml
 [MomijiTLU.tlu]
 ip_hws = "192.168.10.16"
-trigger_input_logic = "CH1 and not CH2"
+trigger_logic = "CH1 and not CH2"
 busy_interface = ["handshake", "veto", "off", "off", "off"]
 trigger_output_width = 255
 ```
