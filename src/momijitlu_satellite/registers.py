@@ -4,12 +4,10 @@ SPDX-License-Identifier: EUPL-1.2
 """
 
 from enum import Enum, IntFlag, unique
+from .trigger_board import N_CH_IN, N_CH_BUSY
 
 # --- fixed parameter，don't change
-N_CH_IN = 4
-N_CH_BUSY = 5
 EVT_BYTES = 24
-
 
 # --- register class
 @unique

@@ -4,6 +4,7 @@ SPDX-License-Identifier: EUPL-1.2
 """
 
 from enum import StrEnum
+import ast
 import struct
 import time
 import socket
@@ -19,7 +20,8 @@ from constellation.core.protocol.cscp1 import SatelliteState
 
 from . import __version__
 from . import rbcp
-from .registers import MomijiReg, Ctrl, Stat, N_CH_IN, N_CH_BUSY, EVT_BYTES
+from .trigger_board import TriggerBoard, N_CH_IN, N_CH_BUSY
+from .registers import MomijiReg, Ctrl, Stat, EVT_BYTES
 
 
 class Polarity(StrEnum):
