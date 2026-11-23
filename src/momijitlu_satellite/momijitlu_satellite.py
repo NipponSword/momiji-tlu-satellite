@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from constellation.core.configuration import Configuration, enum_type
+from constellation.core.configuration import Configuration, Section
 from constellation.core.monitoring import schedule_metric
 from constellation.core.protocol.cscp1 import SatelliteState
 from constellation.core.transmitter_satellite import TransmitterSatellite
@@ -37,6 +37,9 @@ class BusyInMode(StrEnum):
     VETO = "veto"
     OFF = "off"
 
+def bits_where(values: list, target) -> int:
+    """bit k = 1 where values[k] == target (values from Constellation are plain str)"""
+    return sum(1 << k for k, v in enumerate(values) if v == target)
 
 class MomijiTLU(TransmitterSatellite, version=__version__):
     """Momiji-TLU satellite
@@ -296,10 +299,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # --- trigger section
         pol, mode, width = [], [], []
         for ch in range(N_CH_IN):
-            key = f"trigger{ch}"
-            if not config.has(key):
-                continue
-            sec = config.get_section(key)
+            sec = self._get_section(config, f"trigger{ch}")
             mode.append(sec.get_enum(TriggerInMode, "mode", TriggerInMode.EDGE))
             pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
             width.append(sec.get_int("width", 4, min_val=0, max_val=255))
@@ -311,10 +311,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # --- busy section
         pol, mode, width = [], [], []
         for ch in range(N_CH_BUSY):
-            key = f"busy{ch}"
-            if not config.has(key):
-                continue
-            sec.append(config.get_section(key))
+            sec = self._get_section(config, f"busy{ch}")
             mode.append(sec.get_enum(BusyInMode, "mode", BusyInMode.OFF))
             pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
             width.append(sec.get_int("width", 1, min_val=0, max_val=255))
@@ -325,6 +322,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         configuration["busy_input_width"] = width
 
         return configuration
+
+    def _get_section(config:Configuration, key: str) -> Section:
+        return config.get_section(key) if config.has(key) else Section(f"{key}.", {})
 
     def _receive_and_send(self) -> bool:
         """receive from the board, and send every complete event to the receiver satellite
@@ -369,7 +369,3 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # ---- send evt data
         self.send_data_record(data_record)
         self.n_sent += 1
-
-def bits_where(values: list, target) -> int:
-    """bit k = 1 where values[k] == target (values from Constellation are plain str)"""
-    return sum(1 << k for k, v in enumerate(values) if v == target)

@@ -271,7 +271,7 @@ def logic_to_lut(expr: str, n_in: int = N_CH_IN) -> int:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as e:
         raise ValueError(f"cannot parse {expr!r}") from e
-    names = {f"CH{k + 1}" for k in range(n_in)}
+    names = {f"CH{k}" for k in range(n_in)}
 
     def ev(node, gates):
         match node:
