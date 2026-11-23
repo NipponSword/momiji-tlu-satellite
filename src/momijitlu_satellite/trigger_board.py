@@ -15,6 +15,7 @@ from .registers import EVT_BYTES, N_CH_IN, N_CH_BUSY, MomijiReg, Ctrl, Stat
 
 DEFAULT_IP = rbcp.DEFAULT_IP
 DEFAULT_PORT = rbcp.DEFAULT_PORT
+FW_VERSION = 0x2026_1130
 
 class TriggerBoard:
     """Momiji TLU hardware: RBCP registers (UDP) and event data (TCP)
@@ -47,6 +48,10 @@ class TriggerBoard:
         self.close_tcp()
         self._rbcp.close()
 
+    def status(self) -> Stat:
+        """get status"""
+        return Stat(self.read_reg(MomijiReg.STATUS))
+
     # =========================================
     # Initializing
     # =========================================
@@ -70,6 +75,10 @@ class TriggerBoard:
         self.log.info(f"N_IN       {n_in}")
         self.log.info(f"N_BUSY     {n_busy}")
         self.log.info("ID check PASSED 😊")
+
+        if Stat.LOCK not in self.status():
+            raise RuntimeError("PLL not locked")
+        
         return self.fw_version
 
     def configure(self, conf: dict) -> None:

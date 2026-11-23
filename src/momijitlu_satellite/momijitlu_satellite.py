@@ -15,7 +15,7 @@ from constellation.core.protocol.cscp1 import SatelliteState
 from constellation.core.transmitter_satellite import TransmitterSatellite
 
 from . import __version__
-from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN
+from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Stat
 from .busy_interface import BusyInterface, busy_masks
 from .trigger_board import DEFAULT_IP, DEFAULT_PORT, TriggerBoard, decode_event, logic_to_lut
 
@@ -46,10 +46,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.file_path = Path(__file__).parent
         self.board: TriggerBoard | None = None
         self.n_sent = 0
+        self.n_id_gap = 0
         self.cfg = None
 
         # --- secret
         self._rate_prev = {}
+        self._count_prev = {}
 
         # --- register ch-by-ch metric
         for ch in range(N_CH_IN):
@@ -125,7 +127,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         # --- reset
         self.n_sent = 0
+        self.n_id_gap = 0
         self._rate_prev = {}
+        self._count_prev = {}
 
         # --- connect TCP, start trigger + T0 sync
         self.board.start_run()
@@ -134,6 +138,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.bor["firmware_version"] = self.board.fw_version
         self.bor["eudaq_event"] = "TluRawDataEvent"
         self.bor["write_as_blocks"] = True
+        self.bor.update({k: v for k, v in self.cfg.items() 
+                         if k not in ("ip_hws", "port_rbcp", "port_tcp")}
+                        )
 
         return "Do starting complete"
 
@@ -177,10 +184,19 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         if not counters["n_accept"] == self.n_sent:
             self.log.warning(f"n_accept={counters['n_accept']} != n_sent={self.n_sent}. Check quality")
 
+        if counters["n_timeout"]:
+            self.log.error(f"n_timeout={counters["n_timeout"]}: a DUT did not answer busy")
+
+        run_length_s = counters["ts_now"] * 6.25e-9          # TS はラン開始で 0
+        n_trig = counters["n_accept"] + counters["n_drop"]
+        
         self.eor["n_accept"] = counters["n_accept"]
         self.eor["n_drop"] = counters["n_drop"]
         self.eor["n_timeout"] = counters["n_timeout"]
         self.eor["n_in_hit"] = counters["n_in_hit"]
+        self.eor["n_id_gap"] = self.n_id_gap
+        self.eor["run_length_s"] = run_length_s
+        self.eor["drop_fraction"] = counters["n_drop"] / n_trig if n_trig else 0.0
 
         # --- close TCP socket
         self.board.close_tcp()
@@ -203,8 +219,20 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         return self._rate("n_drop")
 
     @schedule_metric("", 2, [SatelliteState.RUN])
+    def almost_full(self) -> int:
+        af = Stat.ALMOST_FULL in self.board.status()
+        if af:
+            self.log.warning("FIFO almost full: triggers are inhibited")
+        return int(af)
+
+    @schedule_metric("", 2, [SatelliteState.RUN])
     def n_timeout(self) -> float | None:
-        return self.board.counters()["n_timeout"]
+        n_timeout = self._get_counters()["n_timeout"]
+        prev = self._count_prev.get("n_timeout")
+        if not (prev is None or n_timeout == prev):
+            self.log.error(f"busy timeout ! n_timeout = {n_timeout}")
+        self._count_prev["n_timeout"] = n_timeout
+        return n_timeout 
 
     def _rate(self, key: str, ch: int | None = None) -> float | None:
         counters = self.board.counters()
@@ -306,6 +334,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             evt (bytes): one 24-byte event from the board
         """
         trigger_id, timestamp, words = decode_event(evt)
+        if trigger_id != self.n_sent:
+            self.n_id_gap += 1
+            self.log.warning(f"trigger ID {trigger_id}, expected {self.n_sent}")
 
         # --- meta record
         data_record = self.new_data_record(
