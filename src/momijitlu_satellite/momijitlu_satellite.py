@@ -3,25 +3,21 @@ SPDX-FileCopyrightText: 2025 DESY and the Constellation authors
 SPDX-License-Identifier: EUPL-1.2
 """
 
-from enum import StrEnum
-import ast
 import struct
 import time
-import socket
-import threading
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from constellation.core.configuration import Configuration, enum_type
-from constellation.core.transmitter_satellite import TransmitterSatellite
 from constellation.core.monitoring import schedule_metric
 from constellation.core.protocol.cscp1 import SatelliteState
-# from constellation.core.commandmanager import cscp_requestable
+from constellation.core.transmitter_satellite import TransmitterSatellite
 
 from . import __version__
-from . import rbcp
-from .trigger_board import TriggerBoard, N_CH_IN, N_CH_BUSY
-from .registers import MomijiReg, Ctrl, Stat, EVT_BYTES
+from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN
+from .busy_interface import BusyInterface, busy_masks
+from .trigger_board import DEFAULT_IP, DEFAULT_PORT, TriggerBoard, decode_event, logic_to_lut
 
 
 class Polarity(StrEnum):
@@ -34,10 +30,11 @@ class Polarity(StrEnum):
 class MomijiTLU(TransmitterSatellite, version=__version__):
     """Momiji-TLU satellite
 
-    Main class of Momiji TLU, enabling to control the TLU, receive data, and send data
+    Main class of Momiji TLU, enabling to control the TLU, receive data, and send data.
+    The hardware access is in TriggerBoard; this class only runs the Constellation FSM.
 
     Attributes:
-        fw_version (int): firmware version of the board
+        board (TriggerBoard): the trigger board
         n_sent (int): the number of data sent to receiver satellite
         cfg (dict): dict derived from constellation.core.configuration
     """
@@ -47,18 +44,12 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         # --- members
         self.file_path = Path(__file__).parent
+        self.board: TriggerBoard | None = None
         self.n_sent = 0
-        self.rbcp = None
-        self.tcp_sock = None
         self.cfg = None
-        self.fw_version = None
 
         # --- secret
-        self._counters = {}
         self._rate_prev = {}
-        self._counters_time = 0
-        self._rbcp_lock = threading.RLock()
-        self._buf = bytearray()
 
         # --- register ch-by-ch metric
         for ch in range(N_CH_IN):
@@ -90,49 +81,13 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # --- get configuration
         self.cfg = self._read_config(config)
 
-        if self.rbcp:
-            self.rbcp.close()
+        if self.board:
+            self.board.close()
+        self.board = TriggerBoard(self.cfg, log=self.log)
 
-        self.rbcp = rbcp.Rbcp(
-            ip=self.cfg["ip_hws"],
-            port=self.cfg["port_rbcp"],
-        )
-
-        # --- check firmware settings
-        self.fw_version = self.read_reg(MomijiReg.FW_VERSION)
-        n_in = self.read_reg(MomijiReg.N_IN)
-        n_busy = self.read_reg(MomijiReg.N_BUSY)
-
-        if (n_in, n_busy) != (N_CH_IN, N_CH_BUSY):
-            raise RuntimeError(f"FW has N_IN={n_in}, N_BUSY={n_busy}, satellite expects {N_CH_IN}/{N_CH_BUSY}")
-
-        self.log.info(f"FW_VERSION 0x{self.fw_version:08x}")
-        self.log.info(f"N_IN       {n_in}")
-        self.log.info(f"N_BUSY     {n_busy}")
-        self.log.info("ID check PASSED 😊")
-
-        # --- write configuration to RBCP regs
-        self.write_reg_and_check(MomijiReg.DUT_MASK, self.cfg["dut_mask"])
-        self.write_reg_and_check(MomijiReg.BLOCK_MASK, self.cfg["block_mask"])
-        self.write_reg_and_check(MomijiReg.LUT, self.cfg["trigger_input_logic"])
-        self.write_reg_and_check(MomijiReg.TRG_O_WIDTH, self.cfg["trigger_output_width"])
-        self.write_reg_and_check(MomijiReg.TRG_INVERT, self.cfg["trigger_polarity"])
-        self.write_reg_and_check(MomijiReg.BUSY_INVERT, self.cfg["busy_polarity"])
-        self.write_reg_and_check(MomijiReg.TRG_EDGE_EN, self.cfg["trigger_edge_enable"])
-        self.write_reg_and_check(MomijiReg.BUSY_TIMEOUT, self.cfg["busy_timeout"])
-        self.write_reg_and_check(MomijiReg.DT_TRG, self.cfg["dt_trigger"])
-        self.write_reg_and_check(MomijiReg.T0_WIDTH, self.cfg["t0_width"])
-
-        for i in range(n_in):
-            self.write_reg_and_check(MomijiReg.TRG_I_WIDTH, self.cfg["trigger_input_width"][i], ch=i)
-        for i in range(n_busy):
-            self.write_reg_and_check(MomijiReg.BUSY_WIDTH, self.cfg["busy_input_width"][i], ch=i)
-
-        self.log.info("All configuration have been written 😊")
-
-        # --- apply
-        self.write_reg(MomijiReg.CTRL, Ctrl.APPLY)
-        self.log.info("APPLY")
+        # --- check firmware settings, write configuration to RBCP regs, APPLY
+        self.board.check_firmware()
+        self.board.configure(self.cfg)
 
         return "Do initializing complete"
 
@@ -149,10 +104,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         """landing, close TCP
 
         Returns:
-            str: _description_
+            str: "Do landing complete"
         """
-        # --- close TCP
-        self._close_tcp()
+        self.board.close_tcp()
 
         return "Do landing complete"
 
@@ -169,27 +123,15 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             str: "Do starting complete"
         """
 
-        # --- create TCP socket
-        try:
-            self.tcp_sock = socket.create_connection((self.cfg["ip_hws"], self.cfg["port_tcp"]), timeout=5)
-        except OSError as e:
-            raise RuntimeError("Cannot connect TCP. Old connection still open? or the ip/port is wrong") from e
-
         # --- reset
         self.n_sent = 0
         self._rate_prev = {}
-        self._buf = bytearray()
 
-        # --- start trigger + T0 sync
-        try:
-            self.tcp_sock.settimeout(0.2)
-            self.write_reg(MomijiReg.CTRL, Ctrl.RUN_START)
-        except Exception as e:
-            self._close_tcp()
-            raise RuntimeError("TCP/RBCP connection failed") from e
+        # --- connect TCP, start trigger + T0 sync
+        self.board.start_run()
 
         # --- set begin-of-run tags
-        self.bor["firmware_version"] = self.fw_version
+        self.bor["firmware_version"] = self.board.fw_version
         self.bor["eudaq_event"] = "TluRawDataEvent"
         self.bor["write_as_blocks"] = True
 
@@ -216,21 +158,21 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         """
 
         # --- stop run
-        self.write_reg(MomijiReg.CTRL, Ctrl.RUN_STOP)
+        self.board.stop_run()
 
         # --- finish processing
         t_end = time.time() + 5
-        while not (self.read_reg(MomijiReg.STATUS) & Stat.EMPTY) and time.time() < t_end:
+        while not self.board.is_empty() and time.time() < t_end:
             self._receive_and_send()
 
         while self._receive_and_send():
             pass
 
-        if self._buf:
-            self.log.warning(f"{len(self._buf)} bytes left over (not a multiple of {EVT_BYTES})")
+        if self.board.leftover_bytes:
+            self.log.warning(f"{self.board.leftover_bytes} bytes left over (not a multiple of {EVT_BYTES})")
 
         # --- set end-of-run tags
-        counters = self._get_counters(time_to_update=0)
+        counters = self.board.counters(time_to_update=0)
 
         if not counters["n_accept"] == self.n_sent:
             self.log.warning(f"n_accept={counters['n_accept']} != n_sent={self.n_sent}. Check quality")
@@ -241,7 +183,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         self.eor["n_in_hit"] = counters["n_in_hit"]
 
         # --- close TCP socket
-        self._close_tcp()
+        self.board.close_tcp()
 
         return "Do stopping complete"
 
@@ -262,11 +204,11 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
     @schedule_metric("", 2, [SatelliteState.RUN])
     def n_timeout(self) -> float | None:
-        return self._get_counters()["n_timeout"]
+        return self.board.counters()["n_timeout"]
 
     def _rate(self, key: str, ch: int | None = None) -> float | None:
-        counters = self._get_counters()
-        count    = counters[key][ch] if ch is not None else counters[key]
+        counters = self.board.counters()
+        count = counters[key][ch] if ch is not None else counters[key]
         key_name = f"{key}_{ch}" if ch is not None else key
         prev = self._rate_prev.get(key_name)
         self._rate_prev[key_name] = (count, counters["ts_now"])
@@ -278,54 +220,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
     # =========================================
     # Utils
     # =========================================
-    def write_reg_and_check(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
-        """write value to register, and check if the response is same as input
-
-        Args:
-            reg (MomijiReg): target register
-            value (int): input value
-            ch (int, optional): which ch. Defaults to 0.
-
-        Raises:
-            RuntimeError: If the check failed
-        """
-
-        # --- write to register
-        self.write_reg(reg, value, ch)
-
-        # --- see value at shadow register
-        response = self.read_reg(reg, ch)
-
-        # --- check
-        if response == value:
-            self.log.info(f"{reg.name}[{ch}]: wrote 0x{value:02x}")
-        else:
-            raise RuntimeError(f"{reg.name}: wrote 0x{value:02x}, read 0x{response:02x}")
-
-    def write_reg(self, reg: MomijiReg, value: int, ch: int = 0) -> None:
-        """write value to register
-
-        Args:
-            reg (MomijiReg): target register
-            value (int): input value
-            ch (int, optional): which ch. Defaults to 0.
-        """
-        with self._rbcp_lock:
-            self.rbcp.write_uint(reg.addr_at(ch), value, reg.n_bytes)
-
-    def read_reg(self, reg: MomijiReg, ch: int = 0) -> int:
-        """read value from register
-
-        Args:
-            reg (MomijiReg): target register
-            ch (int, optional): which ch. Defaults to 0.
-
-        Returns:
-            int: result
-        """
-        with self._rbcp_lock:
-            return self.rbcp.read_uint(reg.addr_at(ch), reg.n_bytes)
-
     def _read_config(self, config: Configuration) -> dict[str, Any]:
         """read configuration saved in Constellation, and dump it to dict
 
@@ -344,8 +238,8 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             return mask
 
         # --- default config
-        config.set_default(key="ip_hws", value="192.168.10.16")
-        config.set_default(key="port_rbcp", value=4660)
+        config.set_default(key="ip_hws", value=DEFAULT_IP)
+        config.set_default(key="port_rbcp", value=DEFAULT_PORT)
         config.set_default(key="port_tcp", value=24)
         config.set_default(key="t0_width", value=16)
         config.set_default(key="trigger_output_width", value=16)
@@ -353,7 +247,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         config.set_default(key="busy_timeout", value=0xFFFF)
         config.set_default(key="dt_trigger", value=0)
         config.set_default(key="trigger_input_width", value=[4] * N_CH_IN)
-        config.set_default(key="busy_input_width", value=[1]*N_CH_BUSY)
+        config.set_default(key="busy_input_width", value=[1] * N_CH_BUSY)
         config.set_default(key="trigger_polarity", value=[Polarity.RISING] * N_CH_IN)
         config.set_default(key="busy_polarity", value=[Polarity.RISING] * N_CH_BUSY)
 
@@ -362,89 +256,56 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             "ip_hws": config.get(key="ip_hws"),
             "port_rbcp": config.get_int(key="port_rbcp"),
             "port_tcp": config.get_int(key="port_tcp"),
-            "dut_mask": config.get_int(key="dut_mask"),
-            "block_mask": config.get_int(key="block_mask"),
             "t0_width": config.get_int(key="t0_width"),
-            "trigger_input_logic": config.get_int(key="trigger_input_logic"),
             "trigger_output_width": config.get_int(key="trigger_output_width"),
             "trigger_edge_enable": config.get_int(key="trigger_edge_enable"),
             "busy_timeout": config.get_int(key="busy_timeout"),
             "dt_trigger": config.get_int(key="dt_trigger", max_val=0xFFFF),
-            "trigger_input_width": config.get_array(
-                key="trigger_input_width", element_type=int
-            ),
-            "busy_input_width": config.get_array(
-                key="busy_input_width", element_type=int
-            ),
+            "trigger_input_width": config.get_array(key="trigger_input_width", element_type=int),
+            "busy_input_width": config.get_array(key="busy_input_width", element_type=int),
             "trigger_polarity": _to_mask(
-                config.get_array(
-                    key="trigger_polarity", element_type=enum_type(Polarity)
-                ),
+                config.get_array(key="trigger_polarity", element_type=enum_type(Polarity)),
                 N_CH_IN,
             ),
             "busy_polarity": _to_mask(
-                config.get_array(
-                    key="busy_polarity", element_type=enum_type(Polarity)
-                ),
+                config.get_array(key="busy_polarity", element_type=enum_type(Polarity)),
                 N_CH_BUSY,
             ),
         }
 
-        # self.status_interval = config.get_float("status_interval")
-        # self.log.debug("Calculating status every %.3f s" % self.status_interval)
+        # --- busy ch settings
+        busy_interface = config.get_array(key="busy_interface", element_type=enum_type(BusyInterface))
+        dut_mask, block_mask = busy_masks(busy_interface)
+        configuration["dut_mask"] = dut_mask
+        configuration["block_mask"] = block_mask
+
+        # --- trigger logic
+        trigger_logic = config.get_str(key="trigger_logic")
+        configuration["trigger_logic"] = logic_to_lut(trigger_logic)
 
         return configuration
 
-    def _receive_and_send(self) -> int:
-        """receive word from TCP, and send it to receiver satellite
-
-        Raises:
-            RuntimeError: TCP connection closed
+    def _receive_and_send(self) -> bool:
+        """receive from the board, and send every complete event to the receiver satellite
 
         Returns:
-            int: If all data have read, 0.
+            bool: False if nothing arrived (timeout)
         """
+        events = self.board.read_events()
+        if events is None:
+            return False
 
-        # --- receive data from TCP
-        try:
-            chunk = self.tcp_sock.recv(65536)
-        except socket.timeout:
-            return 0
-        if not chunk:
-            raise RuntimeError("TCP connection closed by the board")
+        for evt in events:
+            self._send_event(evt)
+        return True
 
-        # --- save to buffer
-        self._buf += chunk
-
-        # --- send data per 24 bytes
-        evt_in_buf = len(self._buf) // EVT_BYTES
-        for k in range(0, evt_in_buf * EVT_BYTES, EVT_BYTES):
-            self._send_event(self._buf[k : k + EVT_BYTES])
-
-        del self._buf[: evt_in_buf * EVT_BYTES]
-
-        return len(chunk)
-
-    def _send_event(self, evt: bytearray) -> None:
+    def _send_event(self, evt: bytes) -> None:
         """send an event
 
         Args:
-            evt (bytearray): original data from TCP
-
-        Raises:
-            RuntimeError: The data is destroyed
+            evt (bytes): one 24-byte event from the board
         """
-
-        # --- unpack bytearray to 6 word (4 byte per word)
-        words = struct.unpack(">6I", evt)
-
-        # --- reconstruct timing info
-        timestamp = 25 * ((((words[0] & 0xFFFF) << 32) | words[1]) >> 2)  # [ns]
-        trigger_id = words[3]
-
-        # --- check
-        if words[5] != 0:
-            raise RuntimeError("The data stream crashed 😡!!")
+        trigger_id, timestamp, words = decode_event(evt)
 
         # --- meta record
         data_record = self.new_data_record(
@@ -461,26 +322,3 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # ---- send evt data
         self.send_data_record(data_record)
         self.n_sent += 1
-
-    def _close_tcp(self) -> None:
-        """safely close TCP"""
-
-        if self.tcp_sock is not None:
-            self.tcp_sock.close()
-            self.tcp_sock = None
-
-    def _get_counters(self, time_to_update: float = 0.5) -> dict:
-        with self._rbcp_lock:
-            now = time.monotonic()
-            if now - self._counters_time > time_to_update:
-                self.write_reg(MomijiReg.CTRL, Ctrl.SNAPSHOT)
-                self._counters = {
-                    "n_accept": self.read_reg(MomijiReg.N_ACCEPT),
-                    "n_drop": self.read_reg(MomijiReg.N_DROP),
-                    "n_timeout": self.read_reg(MomijiReg.N_TIMEOUT),
-                    "n_in_hit": [self.read_reg(MomijiReg.N_IN_HIT, ch=i) for i in range(N_CH_IN)],
-                    "ts_now": self.read_reg(MomijiReg.TS_NOW),
-                }
-
-                self._counters_time = now
-            return self._counters

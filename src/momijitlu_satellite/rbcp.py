@@ -40,7 +40,6 @@ CMD_WRITE = 0x80
 FLAG_ACK = 0x08
 FLAG_BUS_ERR = 0x01
 
-
 # --- Exception handling
 class RbcpError(Exception):
     pass
