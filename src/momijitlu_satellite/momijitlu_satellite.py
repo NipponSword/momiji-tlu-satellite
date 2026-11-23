@@ -15,16 +15,27 @@ from constellation.core.protocol.cscp1 import SatelliteState
 from constellation.core.transmitter_satellite import TransmitterSatellite
 
 from . import __version__
-from .busy_interface import BusyInterface, busy_masks
 from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Stat
 from .trigger_board import DEFAULT_IP, DEFAULT_PORT, TriggerBoard, decode_event, logic_to_lut
 
+class TriggerInMode(StrEnum):
+    """Trigger input mode definition"""
+
+    EDGE = "edge"
+    LEVEL = "level"
 
 class Polarity(StrEnum):
     """Polarity definition"""
 
     RISING = "rising"
     FALLING = "falling"
+
+class BusyInMode(StrEnum):
+    """Busy input mode definition"""
+
+    HANDSHAKE = "handshake"
+    VETO = "veto"
+    OFF = "off"
 
 
 class MomijiTLU(TransmitterSatellite, version=__version__):
@@ -260,26 +271,14 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             dict[str, Any]: dumped cfg
         """
 
-        # --- rewrite polarity setting to 1byte words
-        def _to_mask(polarities, width):
-            mask = sum(1 << i for i, p in enumerate(polarities) if p == Polarity.FALLING)
-            if len(polarities) != width:
-                self.log.warning(f"polarities :{polarities}, bit width: {width}, mask: 0x{mask:08x}")
-            return mask
-
         # --- default config
         config.set_default(key="ip_hws", value=DEFAULT_IP)
         config.set_default(key="port_rbcp", value=DEFAULT_PORT)
         config.set_default(key="port_tcp", value=24)
         config.set_default(key="t0_width", value=16)
         config.set_default(key="trigger_output_width", value=16)
-        config.set_default(key="trigger_edge_enable", value=0x0F)
         config.set_default(key="busy_timeout", value=0xFFFF)
         config.set_default(key="dt_trigger", value=0)
-        config.set_default(key="trigger_input_width", value=[4] * N_CH_IN)
-        config.set_default(key="busy_input_width", value=[1] * N_CH_BUSY)
-        config.set_default(key="trigger_polarity", value=[Polarity.RISING] * N_CH_IN)
-        config.set_default(key="busy_polarity", value=[Polarity.RISING] * N_CH_BUSY)
 
         # --- read config
         configuration = {
@@ -290,26 +289,40 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             "trigger_logic": config.get(key="trigger_logic", return_type=logic_to_lut),
             "t0_width": config.get_int(key="t0_width"),
             "trigger_output_width": config.get_int(key="trigger_output_width"),
-            "trigger_edge_enable": config.get_int(key="trigger_edge_enable"),
             "busy_timeout": config.get_int(key="busy_timeout"),
             "dt_trigger": config.get_int(key="dt_trigger", max_val=0xFFFF),
-            "trigger_input_width": config.get_array(key="trigger_input_width", element_type=int),
-            "busy_input_width": config.get_array(key="busy_input_width", element_type=int),
-            "trigger_polarity": _to_mask(
-                config.get_array(key="trigger_polarity", element_type=enum_type(Polarity)),
-                N_CH_IN,
-            ),
-            "busy_polarity": _to_mask(
-                config.get_array(key="busy_polarity", element_type=enum_type(Polarity)),
-                N_CH_BUSY,
-            ),
         }
 
-        # --- busy ch settings
-        busy_interface = config.get_array(key="busy_interface", element_type=enum_type(BusyInterface))
-        dut_mask, block_mask = busy_masks(busy_interface)
-        configuration["dut_mask"] = dut_mask
-        configuration["block_mask"] = block_mask
+        # --- trigger section
+        pol, mode, width = [], [], []
+        for ch in range(N_CH_IN):
+            key = f"trigger{ch}"
+            if not config.has(key):
+                continue
+            sec = config.get_section(key)
+            mode.append(sec.get_enum(TriggerInMode, "mode", TriggerInMode.EDGE))
+            pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
+            width.append(sec.get_int("width", 4, min_val=0, max_val=255))
+
+        configuration["trigger_edge_enable"] = bits_where(mode, TriggerInMode.EDGE)
+        configuration["trigger_polarity"] = bits_where(pol, Polarity.FALLING)
+        configuration["trigger_input_width"] = width
+
+        # --- busy section
+        pol, mode, width = [], [], []
+        for ch in range(N_CH_BUSY):
+            key = f"busy{ch}"
+            if not config.has(key):
+                continue
+            sec.append(config.get_section(key))
+            mode.append(sec.get_enum(BusyInMode, "mode", BusyInMode.OFF))
+            pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
+            width.append(sec.get_int("width", 1, min_val=0, max_val=255))
+
+        configuration["dut_mask"] = bits_where(mode, BusyInMode.HANDSHAKE)
+        configuration["block_mask"] = bits_where(mode, BusyInMode.VETO)
+        configuration["busy_polarity"] = bits_where(pol, Polarity.FALLING)
+        configuration["busy_input_width"] = width
 
         return configuration
 
@@ -356,3 +369,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # ---- send evt data
         self.send_data_record(data_record)
         self.n_sent += 1
+
+def bits_where(values: list, target) -> int:
+    """bit k = 1 where values[k] == target (values from Constellation are plain str)"""
+    return sum(1 << k for k, v in enumerate(values) if v == target)
