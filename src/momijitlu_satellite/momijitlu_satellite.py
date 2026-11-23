@@ -321,6 +321,9 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         configuration["busy_polarity"] = bits_where(pol, Polarity.FALLING)
         configuration["busy_input_width"] = width
 
+        if configuration["dut_mask"] == 0 and configuration["block_mask"] == 0:
+            self.log.warning("busy mode are not defined")
+
         return configuration
 
     def _receive_and_send(self) -> bool:

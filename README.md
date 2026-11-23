@@ -68,7 +68,7 @@ The following parameters are read and interpreted by this satellite. Parameters 
 | `busy_timeout` | Time to wait busy response | Int | `0xFFFF` |
 | `mode` | Select input mode for trigger/busy | Enum | `edge`(trigger), `off`(busy) |
 | `width` | Fixed trigger/busy length pulsed to original trigger/busy edge | Int | `4`(trigger), `1`(busy) |
-| `polarity` | Which polarity do the trigger/busy inputs have | Enum | `["rising"]` |
+| `polarity` | Which polarity do the trigger/busy inputs have | Enum | `"rising"` |
 | `threshold` | TODO | list[float]? | TODO |
 
 ### Mode
