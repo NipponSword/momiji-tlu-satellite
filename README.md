@@ -59,31 +59,48 @@ The following parameters are read and interpreted by this satellite. Parameters 
 | Parameter | Description | Type | Default Value |
 | --------- | ----------- | ---- | ------------- |
 | `trigger_logic` | Trigger logic for 4 ch input | Str | - |
-| `busy_interface` | Select busy ch from "handshake", "veto", "off" | list[Enum] | - |
 | `t0_width` | T0 signal width for Caribou | Int | `16` (100ns)|
 | `ip_hws` | IP address of HwS | Str | `192.168.10.16` |
 | `port_rbcp` | Port of RBCP connection | Int | `4660` |
 | `port_tcp` | Port of TCP connection | Int | `24` |
 | `dt_trigger` | Dead time after accepted trigger | Int | `0` [6.25ns]|
 | `trigger_output_width` | Output length of trigger signal | Int | `16` (100 ns)|
-| `trigger_edge_enable` | Enable edge detection of trigger (level or edge) | Int | `0x0F` |
 | `busy_timeout` | Time to wait busy response | Int | `0xFFFF` |
-| `trigger_input_width` | How long the input signal stretched. Higher value, more accidental coincidence | list[Int] | `[4,4,4,4]` (25ns) |
-| `busy_input_width` | Fixed busy length pulsed to original busy  | list[Int] | `[1,1,1,1,1]` |
-| `trigger_polarity` | Which polarity do the trigger inputs have | list[Enum] | `["rising"]*4` |
-| `busy_polarity` | Which polarity do the busy inputs have | list[Enum] | `["rising"]*5` |
+| `mode` | Select input mode for trigger/busy | Enum | `edge`(trigger), `off`(busy) |
+| `width` | Fixed trigger/busy length pulsed to original trigger/busy edge | Int | `4`(trigger), `1`(busy) |
+| `polarity` | Which polarity do the trigger/busy inputs have | Enum | `["rising"]` |
 | `threshold` | TODO | list[float]? | TODO |
+
+### Mode
+
+- Trigger input mode:
+  - `EDGE`: enable trigger input edge
+  - `LEVEL`: receive triggger original input as gate
+- Busy input mode:
+  - `HANDSHAKE`: use ch as DUT for handshake
+  - `VETO`: use ch as VETO signal
+  - `OFF`: not concern
 
 ### Configuration Example
 
-An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point
+An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point.
+If you want change parameter for ch input, make section like below.
 
 ```toml
 [MomijiTLU.tlu]
 ip_hws = "192.168.10.16"
-trigger_logic = "CH1 and not CH2"
-busy_interface = ["handshake", "veto", "off", "off", "off"]
+trigger_logic = "CH0 and not CH1"
 trigger_output_width = 255
+
+[MomijiTLU.tlu.busy0]
+mode = "handshake"
+
+[MomijiTLU.tlu.busy1]
+mode = "veto"
+
+[MomijiTLU.tlu.trigger0]
+width = 10
+polarity = "rising"
 ```
 
 ## 📉 Metrics

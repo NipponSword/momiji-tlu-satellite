@@ -266,12 +266,12 @@ def decode_event(evt: bytes) -> tuple[int, int, tuple[int, ...]]:
 
 
 def logic_to_lut(expr: str, n_in: int = N_CH_IN) -> int:
-    """'CH1 and not CH4' -> LUT. bit i = result for inputs = bits of i (CH1 = bit0)"""
+    """'CH0 and not CH3' -> LUT. bit i = result for inputs = bits of i (CH0 = bit0)"""
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as e:
         raise ValueError(f"cannot parse {expr!r}") from e
-    names = {f"CH{k + 1}" for k in range(n_in)}
+    names = {f"CH{k}" for k in range(n_in)}
 
     def ev(node, gates):
         match node:
@@ -284,7 +284,7 @@ def logic_to_lut(expr: str, n_in: int = N_CH_IN) -> int:
             case ast.UnaryOp(op=ast.Not(), operand=o):
                 return not ev(o, gates)
             case ast.Name(id=name) if name.upper() in names:
-                return gates[int(name[2:]) - 1]
+                return gates[int(name[2:])]
         raise ValueError(f"not allowed: {ast.unparse(node)!r}")
 
     lut = 0
