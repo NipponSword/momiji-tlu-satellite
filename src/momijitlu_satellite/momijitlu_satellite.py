@@ -323,9 +323,6 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
 
         return configuration
 
-    def _get_section(config:Configuration, key: str) -> Section:
-        return config.get_section(key) if config.has(key) else Section(f"{key}.", {})
-
     def _receive_and_send(self) -> bool:
         """receive from the board, and send every complete event to the receiver satellite
 
@@ -369,3 +366,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         # ---- send evt data
         self.send_data_record(data_record)
         self.n_sent += 1
+
+    @staticmethod
+    def _get_section(config:Configuration, key: str) -> Section:
+        return config.get_section(key) if config.has(key) else Section(f"{key}.", {})

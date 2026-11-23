@@ -66,9 +66,9 @@ The following parameters are read and interpreted by this satellite. Parameters 
 | `dt_trigger` | Dead time after accepted trigger | Int | `0` [6.25ns]|
 | `trigger_output_width` | Output length of trigger signal | Int | `16` (100 ns)|
 | `busy_timeout` | Time to wait busy response | Int | `0xFFFF` |
-| `mode` | Select input mode for trigger/busy | Enum(mode) | `edge`(trigger), `off`(busy) |
-| `width` | Fixed trigger/busy length pulsed to original trigger/busy edge | list[Int] | `4`(trigger), `1`(busy) |
-| `polarity` | Which polarity do the trigger/busy inputs have | list[Enum] | `["rising"]*4` |
+| `mode` | Select input mode for trigger/busy | Enum | `edge`(trigger), `off`(busy) |
+| `width` | Fixed trigger/busy length pulsed to original trigger/busy edge | Int | `4`(trigger), `1`(busy) |
+| `polarity` | Which polarity do the trigger/busy inputs have | Enum | `["rising"]` |
 | `threshold` | TODO | list[float]? | TODO |
 
 ### Mode
@@ -83,7 +83,8 @@ The following parameters are read and interpreted by this satellite. Parameters 
 
 ### Configuration Example
 
-An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point
+An example configuration for this satellite which could be dropped into a Constellation configuration as a starting point.
+If you want change parameter for ch input, make section like below.
 
 ```toml
 [MomijiTLU.tlu]
