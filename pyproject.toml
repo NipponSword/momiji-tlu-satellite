@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.scripts]
-SatelliteMomijiTLU = "MomijiTLU.__main__:main"
+SatelliteMomijiTLU = "momijitlu_satellite.__main__:main"
 
 [project.entry-points."constellation.satellites"]
-MomijiTLU = "MomijiTLU"
+MomijiTLU = "momijitlu_satellite"
 
 [project.urls]
 Homepage = "TODO"

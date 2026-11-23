@@ -6,10 +6,9 @@ SPDX-License-Identifier: EUPL-1.2
 from enum import Enum, IntFlag, unique
 
 # --- fixed parameter，don't change
+EVT_BYTES = 24
 N_CH_IN = 4
 N_CH_BUSY = 5
-EVT_BYTES = 24
-
 
 # --- register class
 @unique

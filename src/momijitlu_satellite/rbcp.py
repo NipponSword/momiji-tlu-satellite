@@ -40,7 +40,6 @@ CMD_WRITE = 0x80
 FLAG_ACK = 0x08
 FLAG_BUS_ERR = 0x01
 
-
 # --- Exception handling
 class RbcpError(Exception):
     pass
@@ -78,7 +77,7 @@ class Rbcp:
                     ack, _ = self.sock.recvfrom(8 + 255)
                     if len(ack) >= 8 and ack[2] == self.pkt_id:
                         break  # ignore late ACKs of earlier tries
-            except socket.timeout:
+            except TimeoutError:
                 continue
 
             flag = ack[1]
