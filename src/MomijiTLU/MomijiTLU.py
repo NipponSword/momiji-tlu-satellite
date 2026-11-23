@@ -367,7 +367,7 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
             "trigger_output_width": config.get_int(key="trigger_output_width"),
             "trigger_edge_enable": config.get_int(key="trigger_edge_enable"),
             "busy_timeout": config.get_int(key="busy_timeout"),
-            "dt_trigger": config.get_int(key="dt_trigger"),
+            "dt_trigger": config.get_int(key="dt_trigger", max_val=0xFFFF),
             "trigger_input_width": config.get_array(
                 key="trigger_input_width", element_type=int
             ),

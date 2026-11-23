@@ -65,7 +65,7 @@ The following parameters are read and interpreted by this satellite. Parameters 
 | `ip_hws` | IP address of HwS | Str | `192.168.10.16` |
 | `port_rbcp` | Port of RBCP connection | Int | `4660` |
 | `port_tcp` | Port of TCP connection | Int | `24` |
-| `dt_trigger` | Dead time after accepted trigger | Int | `0` |
+| `dt_trigger` | Dead time after accepted trigger | Int | `0` [6.25ns]|
 | `trigger_output_width` | Output length of trigger signal | Int | `16` (100 ns)|
 | `trigger_edge_enable` | Enable edge detection of trigger (level or edge) | Int | `0x0F` |
 | `busy_timeout` | Time to wait busy response | Int | `0xFFFF` |
