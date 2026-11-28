@@ -297,29 +297,33 @@ class MomijiTLU(TransmitterSatellite, version=__version__):
         }
 
         # --- trigger section
-        pol, mode, width = [], [], []
+        pol, mode, width, thre = [], [], []. []
         for ch in range(N_CH_IN):
             sec = self._get_section(config, f"trigger{ch}")
             mode.append(sec.get_enum(TriggerInMode, "mode", TriggerInMode.EDGE))
             pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
             width.append(sec.get_int("width", 4, min_val=0, max_val=255))
+            thre.append(sec.get_float("threshold"), min_val=-5, max_val=5)
 
         configuration["trigger_edge_enable"] = bits_where(mode, TriggerInMode.EDGE)
         configuration["trigger_polarity"] = bits_where(pol, Polarity.FALLING)
         configuration["trigger_input_width"] = width
+        configuration["trigger_input_threshold"] = thre
 
         # --- busy section
-        pol, mode, width = [], [], []
+        pol, mode, width, thre = [], [], [], []
         for ch in range(N_CH_BUSY):
             sec = self._get_section(config, f"busy{ch}")
             mode.append(sec.get_enum(BusyInMode, "mode", BusyInMode.OFF))
             pol.append(sec.get_enum(Polarity, "polarity", Polarity.RISING))
             width.append(sec.get_int("width", 1, min_val=0, max_val=255))
+            thre.append(sec.get_float("threshold"), min_val=-5, max_val=5)
 
         configuration["dut_mask"] = bits_where(mode, BusyInMode.HANDSHAKE)
         configuration["block_mask"] = bits_where(mode, BusyInMode.VETO)
         configuration["busy_polarity"] = bits_where(pol, Polarity.FALLING)
         configuration["busy_input_width"] = width
+        configuration["busy_input_threshold"] = thre
 
         if configuration["dut_mask"] == 0 and configuration["block_mask"] == 0:
             self.log.warning("busy mode are not defined")

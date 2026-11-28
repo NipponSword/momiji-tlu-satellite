@@ -27,7 +27,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "ConstellationDAQ",
+    "ConstellationDAQ==1.0.2",
 ]
 
 [project.scripts]

@@ -12,6 +12,8 @@ import time
 
 from . import rbcp
 from .registers import EVT_BYTES, N_CH_BUSY, N_CH_IN, Ctrl, MomijiReg, Stat
+from .i2c import I2cBus
+from .mcp4728 import Mcp4728
 
 DEFAULT_IP = rbcp.DEFAULT_IP
 DEFAULT_PORT = rbcp.DEFAULT_PORT
@@ -34,6 +36,10 @@ class TriggerBoard:
         self.port_tcp = conf["port_tcp"]
         self.log = log or logging.getLogger(__name__)
         self.fw_version = None
+        self.i2c = I2cBus(
+            write_io = lambda v: self.write_reg(MomijiReg.I2C_IO, v),
+            read_io  = lambda  : self.read_reg(MomijiReg.I2C_IO)
+        )
 
         self._rbcp = rbcp.Rbcp(ip=self.ip, port=conf["port_rbcp"])
         self._rbcp_lock = threading.RLock()
@@ -86,6 +92,9 @@ class TriggerBoard:
         Args:
             conf (dict): configuration made by the satellite
         """
+        # TODO: add set dac from configuraion value
+
+
         self.write_reg_and_check(MomijiReg.DUT_MASK, conf["dut_mask"])
         self.write_reg_and_check(MomijiReg.BLOCK_MASK, conf["block_mask"])
         self.write_reg_and_check(MomijiReg.LUT, conf["trigger_logic"])
@@ -99,6 +108,7 @@ class TriggerBoard:
 
         for i in range(N_CH_IN):
             self.write_reg_and_check(MomijiReg.TRG_I_WIDTH, conf["trigger_input_width"][i], ch=i)
+            
         for i in range(N_CH_BUSY):
             self.write_reg_and_check(MomijiReg.BUSY_WIDTH, conf["busy_input_width"][i], ch=i)
 
@@ -106,6 +116,10 @@ class TriggerBoard:
 
         self.write_reg(MomijiReg.CTRL, Ctrl.APPLY)
         self.log.info("APPLY")
+
+    def set_dac(self, addr: int, ch: int, value: int) -> NOne:
+        with self._rbcp_lock:
+            Mcp4728(self.i2c, addr).set(ch, value)
 
     # =========================================
     # Run control

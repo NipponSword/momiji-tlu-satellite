@@ -20,6 +20,7 @@ class MomijiReg(Enum):
     CTRL = (0x10, 1)
     STATUS = (0x11, 1)
     T0_WIDTH = (0x12, 1)
+    I2C_IO = (0x13, 1)
     TRG_INVERT = (0x20, 1)
     TRG_EDGE_EN = (0x21, 1)
     TRG_I_WIDTH = (0x28, 1, N_CH_IN)
